@@ -1,14 +1,16 @@
 import asyncio
 import html
+import http.cookiejar
 import json
 import re
 import sys
+from pathlib import Path
 from typing import Any, Optional
 from urllib.parse import urljoin, urlparse
 
 import httpx
 
-from app.config import settings
+from app.config import find_ffmpeg_executable, settings
 from app.schemas import FormatOption, FormatPreset, InspectResponse, MediaType
 
 
@@ -468,6 +470,72 @@ AD_HOST_KEYWORDS = (
 )
 
 
+async def _probe_stream_resolution(stream_url: str, referer: Optional[str] = None) -> tuple[Optional[int], Optional[int]]:
+    """Uses ffprobe to detect true width/height on single-stream HLS/MP4 URLs."""
+    ff_bin = find_ffmpeg_executable()
+    if not ff_bin:
+        return None, None
+    ffprobe_bin = str(Path(ff_bin).parent / ("ffprobe.exe" if sys.platform == "win32" else "ffprobe"))
+    if not Path(ffprobe_bin).exists():
+        return None, None
+    headers = "User-Agent: Mozilla/5.0\r\n"
+    if referer:
+        headers += f"Referer: {referer}\r\n"
+    cmd = [
+        ffprobe_bin,
+        "-allowed_extensions",
+        "ALL",
+        "-v",
+        "error",
+        "-headers",
+        headers,
+        "-select_streams",
+        "v:0",
+        "-show_entries",
+        "stream=width,height",
+        "-of",
+        "json",
+        stream_url,
+    ]
+    try:
+        code, stdout, _ = await _run_cli_json(cmd, timeout=12)
+        if code == 0 and stdout.strip():
+            parsed = json.loads(stdout)
+            streams = parsed.get("streams") or []
+            if streams and isinstance(streams[0], dict):
+                w = streams[0].get("width")
+                h = streams[0].get("height")
+                if isinstance(w, int) and isinstance(h, int) and w > 0 and h > 0:
+                    return w, h
+    except Exception:
+        pass
+    return None, None
+
+
+def _load_playwright_cookies() -> list[dict[str, Any]]:
+    cookies_file = settings.resolved_cookies_file
+    if not cookies_file:
+        return []
+    try:
+        jar = http.cookiejar.MozillaCookieJar(str(cookies_file))
+        jar.load(ignore_discard=True, ignore_expires=True)
+        out: list[dict[str, Any]] = []
+        for c in jar:
+            cookie: dict[str, Any] = {
+                "name": c.name,
+                "value": c.value or "",
+                "domain": c.domain,
+                "path": c.path or "/",
+                "secure": bool(c.secure),
+            }
+            if c.expires:
+                cookie["expires"] = float(c.expires)
+            out.append(cookie)
+        return out
+    except Exception:
+        return []
+
+
 async def _playwright_scan_media(
     url: str,
     referer: Optional[str] = None,
@@ -508,6 +576,12 @@ async def _playwright_scan_media(
                 ),
                 extra_http_headers={"Referer": referer} if referer else {},
             )
+            pw_cookies = _load_playwright_cookies()
+            if pw_cookies:
+                try:
+                    await context.add_cookies(pw_cookies)
+                except Exception:
+                    pass
             page = await context.new_page()
 
             def on_response(res: Any) -> None:
@@ -534,7 +608,34 @@ async def _playwright_scan_media(
 
             page.on("response", on_response)
             await page.goto(url, wait_until="domcontentloaded", timeout=20_000)
-            await page.wait_for_timeout(5500)
+            await page.wait_for_timeout(5000)
+
+            # If the player exposes unlocked higher quality options (no crown/lock/premium badge), select the highest unlocked one
+            try:
+                switched = await page.evaluate(
+                    """() => {
+                        const popBtn = document.querySelector('button[aria-controls="HTVPlayerQualityPopover"]');
+                        if (popBtn) popBtn.click();
+                        const pop = document.getElementById('HTVPlayerQualityPopover');
+                        if (!pop) return false;
+                        const btns = Array.from(pop.querySelectorAll('button'));
+                        for (const label of ['2160p', '1440p', '1080p']) {
+                            const match = btns.find(b => (b.innerText || '').includes(label));
+                            if (!match) continue;
+                            const html = (match.innerHTML || '').toLowerCase();
+                            const isLocked = match.disabled || html.includes('crown') || html.includes('lock') || html.includes('premium') || html.includes('vip');
+                            if (!isLocked) {
+                                match.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }"""
+                )
+                if switched:
+                    await page.wait_for_timeout(3000)
+            except Exception:
+                pass
 
             page_title = (await page.title() or "").strip()
             body_text = (await page.evaluate("() => (document.body?.innerText || '').slice(0, 2500)") or "").lower()
@@ -682,6 +783,19 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
     stream_url = next((c for c in candidates if ".m3u8" in c.lower() or "/hls/" in c.lower()), candidates[0])
     yt_stream = await _inspect_with_ytdlp(stream_url, referer=referer or url)
     if yt_stream and "_error" not in yt_stream:
+        has_heights = any(
+            isinstance(f, dict) and isinstance(f.get("height"), (int, float))
+            for f in (yt_stream.get("formats") or [])
+        )
+        if not has_heights:
+            pw, ph = await _probe_stream_resolution(stream_url, referer=referer or url)
+            if pw and ph:
+                yt_stream["width"] = pw
+                yt_stream["height"] = ph
+                if isinstance(yt_stream.get("formats"), list) and len(yt_stream["formats"]) == 1 and isinstance(yt_stream["formats"][0], dict):
+                    yt_stream["formats"][0]["width"] = pw
+                    yt_stream["formats"][0]["height"] = ph
+
         return InspectResponse(
             url=stream_url,
             resolved_stream_url=stream_url,

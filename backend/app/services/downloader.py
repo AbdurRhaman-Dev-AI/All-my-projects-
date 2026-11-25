@@ -240,6 +240,7 @@ class DownloadManager:
             "no_warnings": True,
             "progress_hooks": [progress_hook],
             "format": FORMAT_SELECTORS.get(format_id, "bv*+ba/b"),
+            "format_sort": ["res", "fps"],
         }
 
         if referer:

@@ -126,3 +126,13 @@ Created a monorepo under `downloder laibary/`:
    - Added `.srt` / `.vtt` subtitle downloading (`download_subtitles`) and duplicate URL detection (`existing_media_id`) inside `InspectModal`.
 4. **GitHub Auto-Commit Policy (`AGENTS.md`, `.gitignore`)**:
    - Configured repository tracking to `https://github.com/AbdurRhaman-Dev-AI/All-my-projects-.git` (`main`) with automatic commits on every change.
+
+---
+
+## Step 10: Playwright JS SPA Extraction, Windows Path Safety & True Resolution Probing
+1. **Playwright Force Download Scanner (`backend/app/services/inspector.py`)**:
+   - Added `_playwright_scan_media()` to render non-challenged JS SPA pages (like `hanime.tv`) in headless Chrome/Edge, filter out ad CDNs, load user-provided `cookies.txt`, select the highest unlocked quality when available, and capture dynamic `application/x-mpegurl` / `.mp4` streams.
+   - Added `_probe_stream_resolution()` via `ffprobe -allowed_extensions ALL` so single-resolution HLS streams report their exact resolution (`720p`, `1080p`, etc.) instead of assuming `1080p`.
+2. **Windows `MAX_PATH` & `FFmpeg` `PATH` Fixes (`backend/app/services/downloader.py`, `config.py`)**:
+   - Shortened `outtmpl` stems (`{caption[:44]}_{job_id[:8]}.%(ext)s`) so long HLS tokens never exceed Windows' 260-character path limit.
+   - Resolved real `Gyan.FFmpeg*/**/bin` path and injected it into `os.environ["PATH"]` on startup, plus added `"format_sort": ["res", "fps"]` to prioritize highest resolution first.
