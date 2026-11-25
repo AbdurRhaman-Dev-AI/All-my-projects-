@@ -1,0 +1,74 @@
+@import "tailwindcss";
+
+:root {
+  --mv-bg: #131317;
+  --mv-bg-radial-1: rgba(10, 132, 255, 0.14);
+  --mv-bg-radial-2: rgba(94, 92, 230, 0.12);
+  --mv-surface: rgba(31, 31, 35, 0.68);
+  --mv-surface-elevated: rgba(42, 41, 46, 0.78);
+  --mv-surface-lowest: #0e0e12;
+  --mv-text: #e4e1e7;
+  --mv-text-muted: #c0c6d6;
+  --mv-text-subtle: #8b91a0;
+  --mv-border: rgba(255, 255, 255, 0.11);
+  --mv-rim: inset 0 1px 0 0 rgba(255, 255, 255, 0.14);
+  --mv-primary: #0a84ff;
+  --mv-primary-soft: #aac7ff;
+  --mv-secondary: #5e5ce6;
+  --mv-tertiary: #30d158;
+  --mv-error: #ffb4ab;
+}
+
+html.light {
+  --mv-bg: #f2f4f8;
+  --mv-bg-radial-1: rgba(0, 122, 255, 0.12);
+  --mv-bg-radial-2: rgba(88, 86, 214, 0.09);
+  --mv-surface: rgba(255, 255, 255, 0.72);
+  --mv-surface-elevated: rgba(255, 255, 255, 0.88);
+  --mv-surface-lowest: #e7ebf2;
+  --mv-text: #111827;
+  --mv-text-muted: #374151;
+  --mv-text-subtle: #6b7280;
+  --mv-border: rgba(15, 23, 42, 0.1);
+  --mv-rim: inset 0 1px 0 0 rgba(255, 255, 255, 0.8);
+  --mv-primary: #007aff;
+  --mv-primary-soft: #005db8;
+  --mv-secondary: #5856d6;
+  --mv-tertiary: #28cd41;
+  --mv-error: #dc2626;
+}
+
+body {
+  background-color: var(--mv-bg);
+  background-image:
+    radial-gradient(60rem 40rem at 15% -10%, var(--mv-bg-radial-1), transparent 60%),
+    radial-gradient(50rem 35rem at 85% 0%, var(--mv-bg-radial-2), transparent 55%);
+  background-attachment: fixed;
+  color: var(--mv-text);
+  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.liquid-glass {
+  background: var(--mv-surface);
+  backdrop-filter: blur(28px) saturate(160%);
+  -webkit-backdrop-filter: blur(28px) saturate(160%);
+  border: 1px solid var(--mv-border);
+  box-shadow: var(--mv-rim), 0 12px 32px rgba(0, 0, 0, 0.22);
+}
+
+.liquid-glass-elevated {
+  background: var(--mv-surface-elevated);
+  backdrop-filter: blur(36px) saturate(180%);
+  -webkit-backdrop-filter: blur(36px) saturate(180%);
+  border: 1px solid var(--mv-border);
+  box-shadow: var(--mv-rim), 0 24px 64px rgba(0, 0, 0, 0.38);
+}
+
+.font-mono-meta {
+  font-family: var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, monospace;
+}
+
+.progress-bloom {
+  box-shadow: 0 0 10px rgba(10, 132, 255, 0.65);
+}
