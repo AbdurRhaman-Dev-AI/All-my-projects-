@@ -156,68 +156,73 @@ async def _search_hanime_red(query: str, limit: int = 10, page: int = 1) -> list
     """Search Hentai on hanime.red (only called when safe_mode=False)."""
     base = "https://hanime.red"
     if query.strip():
-        target = f"{base}/search?q={quote_plus(query)}&page={page}" if page > 1 else f"{base}/search?q={quote_plus(query)}"
+        target_urls = [f"{base}/search?q={quote_plus(query)}&page={page}" if page > 1 else f"{base}/search?q={quote_plus(query)}"]
     else:
-        target = f"{base}/?page={page}" if page > 1 else f"{base}/"
-    results: list[SearchResultItem] = []
+        target_urls = [f"{base}/", f"{base}/hentai", f"{base}/series"]
+
+    all_items: list[SearchResultItem] = []
     seen: set[str] = set()
     try:
         async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=_HEADERS) as client:
-            resp = await client.get(target)
-        if resp.status_code != 200:
-            return results
-
-        # Extract cards: <a href="/...">...<img src="/media/posters/..." alt="...">...</a>
-        for m in re.finditer(
-            r'<a[^>]+href="(/(?:serie/)?[a-z0-9][a-z0-9-]+)"[^>]*>(.*?)</a>',
-            resp.text,
-            re.S,
-        ):
-            href, inner = m.group(1), m.group(2)
-            if href in seen or any(skip in href for skip in ("/genres", "/studios", "/search", "/login", "/register")):
-                continue
-            img_m = re.search(r'<img[^>]+src="([^"]*posters[^"]+|[^"]*backdrops[^"]+)"[^>]*alt="([^"]*)"', inner)
-            if not img_m:
-                img_m = re.search(r'<img[^>]+alt="([^"]*)"[^>]*src="([^"]*posters[^"]+)"', inner)
-                if img_m:
-                    alt_text, poster = img_m.group(1), img_m.group(2)
-                else:
+            for target in target_urls:
+                if not query.strip() and len(all_items) >= limit * page:
+                    break
+                resp = await client.get(target)
+                if resp.status_code != 200:
                     continue
-            else:
-                poster, alt_text = img_m.group(1), img_m.group(2)
 
-            title = _clean_text(alt_text) or href.strip("/").replace("-", " ").title()
-            if len(title) < 2:
-                continue
-            seen.add(href)
-            thumb = urljoin(base, poster)
-            full_url = urljoin(base, href)
-            results.append(
-                SearchResultItem(
-                    id=f"hanime-{len(results)}-{href.strip('/')[:16]}",
-                    title=title,
-                    subtitle="Hanime.red • 18+ Hentai",
-                    category="hentai",
-                    platform="hanime",
-                    source_domain="hanime.red",
-                    site_name="Hanime.red",
-                    thumbnail_url=thumb,
-                    url=full_url,
-                    watchable=True,
-                    downloadable=True,
-                    duration=None,
-                    rating=None,
-                    year=None,
-                    genres=["Hentai", "18+"],
-                    description=title,
-                    is_adult=True,
-                )
-            )
-            if len(results) >= limit:
-                break
+                for m in re.finditer(
+                    r'<a[^>]+href="(/(?:serie/)?[a-z0-9][a-z0-9-]+)"[^>]*>(.*?)</a>',
+                    resp.text,
+                    re.S,
+                ):
+                    href, inner = m.group(1), m.group(2)
+                    if href in seen or any(skip in href for skip in ("/genres", "/studios", "/search", "/login", "/register", "/hentai", "/series")):
+                        continue
+                    img_m = re.search(r'<img[^>]+src="([^"]*posters[^"]+|[^"]*backdrops[^"]+)"[^>]*alt="([^"]*)"', inner)
+                    if not img_m:
+                        img_m = re.search(r'<img[^>]+alt="([^"]*)"[^>]*src="([^"]*posters[^"]+)"', inner)
+                        if img_m:
+                            alt_text, poster = img_m.group(1), img_m.group(2)
+                        else:
+                            continue
+                    else:
+                        poster, alt_text = img_m.group(1), img_m.group(2)
+
+                    title = _clean_text(alt_text) or href.strip("/").replace("-", " ").title()
+                    if len(title) < 2:
+                        continue
+                    seen.add(href)
+                    thumb = urljoin(base, poster)
+                    full_url = urljoin(base, href)
+                    all_items.append(
+                        SearchResultItem(
+                            id=f"hanime-{href.strip('/')[:32]}",
+                            title=title,
+                            subtitle="Hanime.red • 18+ Hentai",
+                            category="hentai",
+                            platform="hanime",
+                            source_domain="hanime.red",
+                            site_name="Hanime.red",
+                            thumbnail_url=thumb,
+                            url=full_url,
+                            watchable=True,
+                            downloadable=True,
+                            duration=None,
+                            rating=None,
+                            year=None,
+                            genres=["Hentai", "18+"],
+                            description=title,
+                            is_adult=True,
+                        )
+                    )
     except Exception:
         pass
-    return results
+
+    if query.strip():
+        return all_items[:limit]
+    start = (page - 1) * limit
+    return all_items[start : start + limit]
 
 
 async def _search_anilist(query: str, safe_mode: bool = True, limit: int = 8, page: int = 1) -> list[SearchResultItem]:

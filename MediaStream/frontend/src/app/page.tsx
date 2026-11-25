@@ -263,7 +263,7 @@ export default function HomePage() {
       try {
         const results = await searchCatalog({ q, category: cat, safeMode: effectiveSafe, page: 1 });
         setSearchResults(results);
-        setHasMoreResults(results.length >= 6);
+        setHasMoreResults(results.length > 0);
       } catch (err) {
         setSearchError(err instanceof Error ? err.message : "Search failed.");
       } finally {
@@ -291,7 +291,6 @@ export default function HomePage() {
         setSearchResults((prev) => {
           const seen = new Set(prev.map((p) => `${p.platform}-${p.id}`));
           const unique = more.filter((m) => !seen.has(`${m.platform}-${m.id}`));
-          if (unique.length === 0) setHasMoreResults(false);
           return [...prev, ...unique];
         });
       }

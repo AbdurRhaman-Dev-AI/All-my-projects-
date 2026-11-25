@@ -48,11 +48,11 @@ export function MediaLightbox({ item, onClose, onUpdate, onDelete }: MediaLightb
       onClick={onClose}
     >
       <div
-        className="liquid-glass-elevated grid max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-3xl lg:grid-cols-[1.4fr_1fr]"
+        className="liquid-glass-elevated grid max-h-[92vh] w-full max-w-5xl overflow-hidden rounded-3xl lg:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)]"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Media Stage */}
-        <div className="relative flex min-h-[320px] items-center justify-center bg-black/60 p-4">
+        <div className="relative flex min-h-[320px] min-w-0 items-center justify-center bg-black/60 p-4">
           {mediaSrc && item.media_type === "video" && (
             <video src={mediaSrc} controls autoPlay className="max-h-[78vh] w-full rounded-2xl" />
           )}
@@ -102,8 +102,8 @@ export function MediaLightbox({ item, onClose, onUpdate, onDelete }: MediaLightb
         </div>
 
         {/* Metadata & Tag Editor */}
-        <div className="flex flex-col justify-between border-t border-[var(--mv-border)] p-6 lg:border-l lg:border-t-0">
-          <div className="space-y-4 overflow-y-auto">
+        <div className="flex min-w-0 flex-col justify-between border-t border-[var(--mv-border)] p-6 lg:border-l lg:border-t-0">
+          <div className="min-w-0 space-y-4 overflow-y-auto">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
                 <PlatformBadge
@@ -124,7 +124,7 @@ export function MediaLightbox({ item, onClose, onUpdate, onDelete }: MediaLightb
               </button>
             </div>
 
-            <p className="text-sm leading-relaxed text-[var(--mv-text)]">{item.caption}</p>
+            <p className="break-all text-sm leading-relaxed text-[var(--mv-text)]">{item.caption}</p>
 
             <div className="flex flex-wrap items-center gap-3">
               <a

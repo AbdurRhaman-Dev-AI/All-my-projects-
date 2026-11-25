@@ -193,14 +193,15 @@ class DownloadManager:
                 None,
             )
             if video_file:
-                proc = await asyncio.create_subprocess_exec(
-                    ffmpeg_bin, "-y", "-i", str(video_file), "-ss", "00:00:01", "-vframes", "1", str(thumb_dest),
-                    stdout=asyncio.subprocess.DEVNULL,
-                    stderr=asyncio.subprocess.DEVNULL,
-                )
-                await proc.wait()
-                if thumb_dest.exists():
-                    return f"thumbnails/{thumb_dest.name}"
+                for ts in ("00:00:05", "00:00:01"):
+                    proc = await asyncio.create_subprocess_exec(
+                        ffmpeg_bin, "-y", "-ss", ts, "-i", str(video_file), "-vframes", "1", str(thumb_dest),
+                        stdout=asyncio.subprocess.DEVNULL,
+                        stderr=asyncio.subprocess.DEVNULL,
+                    )
+                    await proc.wait()
+                    if thumb_dest.exists() and thumb_dest.stat().st_size > 1000:
+                        return f"thumbnails/{thumb_dest.name}"
 
         return None
 
