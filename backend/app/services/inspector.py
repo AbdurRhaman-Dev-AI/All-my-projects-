@@ -42,11 +42,22 @@ def format_bytes(num_bytes: Optional[int]) -> Optional[str]:
 def classify_error(raw_error: str) -> str:
     msg = raw_error.strip()
     lower = msg.lower()
-    if any(k in lower for k in ("cf-mitigated", "just a moment", "turnstile", "captcha", "verify you are human")):
+    if any(
+        k in lower
+        for k in (
+            "cf-mitigated",
+            "just a moment",
+            "turnstile",
+            "captcha",
+            "verify you are human",
+            "cloudflare",
+            "anti-bot",
+            "challenge-platform",
+        )
+    ):
         return (
-            "This website is protected by a Cloudflare anti-bot / CAPTCHA challenge. "
-            "MediaVault cannot bypass anti-bot challenges automatically. "
-            "If you already have a direct .m3u8/.mp4 stream URL from your browser, paste it into Force Download, or add cf_clearance cookies in Folder & Cookies."
+            "This site or CDN is protected by a Cloudflare anti-bot / CAPTCHA challenge. "
+            "MediaVault cannot bypass anti-bot challenges automatically."
         )
     if any(
         k in lower
@@ -316,10 +327,17 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
         resp = await client.get(url)
 
     cf_mitigated = resp.headers.get("cf-mitigated", "").lower()
+    body_head = resp.text[:6000].lower()
     if resp.status_code in (403, 429, 503) and (
-        "challenge" in cf_mitigated or "just a moment" in resp.text[:1200].lower() or "turnstile" in resp.text.lower()
+        "challenge" in cf_mitigated
+        or "just a moment" in body_head
+        or "attention required" in body_head
+        or "cloudflare" in body_head
+        or "turnstile" in body_head
+        or "challenge-platform" in body_head
+        or "cf_chl" in body_head
     ):
-        raise RuntimeError(classify_error("cf-mitigated challenge: Just a moment..."))
+        raise RuntimeError(classify_error("cloudflare anti-bot challenge: Attention Required"))
 
     if resp.status_code >= 400:
         raise RuntimeError(f"Page returned HTTP {resp.status_code} while scanning for media.")
