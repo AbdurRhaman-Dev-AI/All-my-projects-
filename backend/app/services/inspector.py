@@ -158,6 +158,18 @@ def _extract_resolution(info: dict[str, Any]) -> Optional[str]:
     return None
 
 
+DEFAULT_TIER_KBPS: dict[str, int] = {
+    "mp4_2160p": 14000,
+    "mp4_1440p": 7500,
+    "mp4_1080p": 3200,
+    "mp4_720p": 1600,
+    "mp4_480p": 850,
+    "mp4_360p": 550,
+    "mp4_240p": 350,
+    "mp4_144p": 200,
+}
+
+
 def _estimate_stream_bytes(fmt: dict[str, Any], duration: Optional[float]) -> Optional[int]:
     fs = fmt.get("filesize") or fmt.get("filesize_approx")
     if isinstance(fs, (int, float)) and fs > 0:
@@ -165,6 +177,11 @@ def _estimate_stream_bytes(fmt: dict[str, Any], duration: Optional[float]) -> Op
     tbr = fmt.get("tbr")
     if isinstance(tbr, (int, float)) and tbr > 0 and duration and duration > 0:
         return int((tbr * 1000.0 / 8.0) * duration)
+    vbr = fmt.get("vbr") or 0
+    abr = fmt.get("abr") or 0
+    combined_br = (vbr if isinstance(vbr, (int, float)) else 0) + (abr if isinstance(abr, (int, float)) else 0)
+    if combined_br > 0 and duration and duration > 0:
+        return int((combined_br * 1000.0 / 8.0) * duration)
     return None
 
 
@@ -272,6 +289,9 @@ async def _build_formats_from_info(media_type: MediaType, info: Optional[dict[st
                 sizes.append(total)
 
         est_bytes = max(sizes) if sizes else None
+        if est_bytes is None and duration and duration > 0:
+            fallback_kbps = DEFAULT_TIER_KBPS.get(preset_id, 1200) + 128
+            est_bytes = int((fallback_kbps * 1000.0 / 8.0) * duration)
         if est_bytes and (best_total_bytes is None or est_bytes > best_total_bytes):
             best_total_bytes = est_bytes
 
@@ -307,13 +327,35 @@ async def _build_formats_from_info(media_type: MediaType, info: Optional[dict[st
     )
 
     if not options:
-        options = [
-            best_opt,
-            FormatOption(id="mp4_1080p", kind="video", label="1080p", description="Full HD MP4", resolution_tag="1080p", badge_tag="FHD", available=True),
-            FormatOption(id="mp4_720p", kind="video", label="720p", description="HD MP4", resolution_tag="720p", badge_tag="HD", available=True),
-            FormatOption(id="mp4_480p", kind="video", label="480p", description="Standard 480p MP4", resolution_tag="480p", available=True),
+        fallback_items = [
+            ("mp4_1080p", "1080p", "Full HD MP4", "1080p", "FHD"),
+            ("mp4_720p", "720p", "HD MP4", "720p", "HD"),
+            ("mp4_480p", "480p", "Standard 480p MP4", "480p", None),
         ]
+        built_fallback: list[FormatOption] = []
+        for pid, lbl, dsc, rtag, btag in fallback_items:
+            est = int(((DEFAULT_TIER_KBPS[pid] + 128) * 1000.0 / 8.0) * duration) if duration and duration > 0 else None
+            built_fallback.append(
+                FormatOption(
+                    id=pid,  # type: ignore[arg-type]
+                    kind="video",
+                    label=lbl,
+                    description=dsc,
+                    resolution_tag=rtag,
+                    badge_tag=btag,
+                    estimated_size_bytes=est,
+                    estimated_size_label=format_bytes(est),
+                    available=True,
+                )
+            )
+        if best_opt.estimated_size_bytes is None and built_fallback[0].estimated_size_bytes:
+            best_opt.estimated_size_bytes = built_fallback[0].estimated_size_bytes
+            best_opt.estimated_size_label = built_fallback[0].estimated_size_label
+        options = [best_opt, *built_fallback]
     else:
+        if best_opt.estimated_size_bytes is None and options[0].estimated_size_bytes:
+            best_opt.estimated_size_bytes = options[0].estimated_size_bytes
+            best_opt.estimated_size_label = options[0].estimated_size_label
         options = [best_opt, *options]
 
     audio_320 = int(320_000 / 8 * duration) if duration else best_audio_bytes
