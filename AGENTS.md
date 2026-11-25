@@ -1,5 +1,8 @@
-# Project Rules — MediaVault (`downloder laibary`)
+# Repository Rules — All My Projects
+
+## Multi-Project Organization
+- Each project lives in its own top-level folder (e.g., `MediaVault/`). Never place project-specific `backend/` or `frontend/` folders at the repository root.
+- Keep the root `README.md` updated whenever a new project folder is added.
 
 ## Automatic Git Commit Policy
-- Every time any file in this project (`downloder laibary`) is created, edited, or deleted, you MUST run `git add` and `git commit` with a clear, descriptive commit message in this repository (`https://github.com/AbdurRhaman-Dev-AI/All-my-projects-.git`, branch `main`) before finishing your response.
-- After committing, push to `origin main` (`git push origin main`) when the user requests syncing or when network/auth is available, and never commit secrets (`cookies.txt`, `.env`, API keys) or local media/venv artifacts (`storage/`, `.venv/`, `node_modules/`).
+- Every time any file in a project is created, edited, or deleted, commit and push changes to `origin main` (`https://github.com/AbdurRhaman-Dev-AI/All-my-projects-.git`), and never commit secrets (`cookies.txt`, `.env`, API keys) or local media/venv artifacts.

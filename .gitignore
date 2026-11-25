@@ -1,16 +1,15 @@
-# Storage & Secrets
-storage/media/
-storage/thumbnails/
-storage/*.db
-storage/user_settings.json
-backend/.env
-backend/cookies.txt
-backend/.venv/
-backend/__pycache__/
+# Storage & Secrets (applies across all project subfolders)
+**/storage/media/
+**/storage/thumbnails/
+**/storage/*.db
+**/storage/user_settings.json
+**/backend/.env
+**/backend/cookies.txt
+**/backend/.venv/
 **/__pycache__/
 
 # Frontend
-frontend/node_modules/
-frontend/.next/
-frontend/.env.local
-frontend/tsconfig.tsbuildinfo
+**/node_modules/
+**/.next/
+**/.env.local
+**/tsconfig.tsbuildinfo
