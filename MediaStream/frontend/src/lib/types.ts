@@ -14,7 +14,7 @@ export type FormatPreset =
   | "audio_mp3_256"
   | "audio_mp3_128"
   | "original_images";
-export type QueueStatus = "queued" | "downloading" | "processing" | "completed" | "failed";
+export type QueueStatus = "queued" | "downloading" | "processing" | "paused" | "completed" | "failed" | "cancelled";
 
 export interface FormatOption {
   id: FormatPreset;
@@ -131,7 +131,7 @@ export interface SearchResultItem {
   id: string;
   title: string;
   subtitle: string;
-  category: "video" | "anime" | "tv" | "archive";
+  category: "video" | "music" | "anime" | "tv" | "movie" | "hentai" | "archive";
   platform: string;
   source_domain: string;
   site_name: string;

@@ -1,7 +1,7 @@
 "use client";
 
-import { CheckCircle2, Clock, Download, FolderOpen, Loader2, Trash2, X, XCircle } from "lucide-react";
-import { mediaDownloadUrl, revealMediaInFolder } from "@/lib/api";
+import { CheckCircle2, Clock, Download, FolderOpen, Loader2, Pause, Play, Trash2, X, XCircle } from "lucide-react";
+import { cancelQueueJob, mediaDownloadUrl, pauseQueueJob, resumeQueueJob, revealMediaInFolder } from "@/lib/api";
 import type { QueueJob, QueueStatus } from "@/lib/types";
 
 interface QueueDrawerProps {
@@ -9,23 +9,26 @@ interface QueueDrawerProps {
   jobs: QueueJob[];
   onClose: () => void;
   onClearCompleted: () => void;
+  onRefreshQueue?: () => void;
 }
 
 const STATUS_STYLE: Record<QueueStatus, { label: string; cls: string }> = {
   queued: { label: "Queued", cls: "bg-white/10 text-[var(--mv-text-muted)] border-white/15" },
-  downloading: { label: "Downloading", cls: "bg-[#0a84ff]/20 text-[#aac7ff] border-[#0a84ff]/40" },
-  processing: { label: "Processing", cls: "bg-[#5e5ce6]/20 text-[#c2c1ff] border-[#5e5ce6]/40" },
-  completed: { label: "Completed", cls: "bg-[#30d158]/20 text-[#47e266] border-[#30d158]/40" },
+  downloading: { label: "Downloading", cls: "bg-cyan-500/20 text-cyan-200 border-cyan-400/40" },
+  processing: { label: "Processing", cls: "bg-teal-500/20 text-teal-200 border-teal-400/40" },
+  paused: { label: "Paused", cls: "bg-amber-500/20 text-amber-200 border-amber-400/40" },
+  completed: { label: "Completed", cls: "bg-emerald-500/20 text-emerald-300 border-emerald-400/40" },
   failed: { label: "Failed", cls: "bg-red-500/20 text-[#ffb4ab] border-red-500/40" },
+  cancelled: { label: "Cancelled", cls: "bg-white/10 text-[var(--mv-text-subtle)] border-white/15" },
 };
 
-export function QueueDrawer({ open, jobs, onClose, onClearCompleted }: QueueDrawerProps) {
+export function QueueDrawer({ open, jobs, onClose, onClearCompleted, onRefreshQueue }: QueueDrawerProps) {
   if (!open) return null;
 
   const activeCount = jobs.filter((j) =>
-    ["queued", "downloading", "processing"].includes(j.status)
+    ["queued", "downloading", "processing", "paused"].includes(j.status)
   ).length;
-  const hasDone = jobs.some((j) => j.status === "completed" || j.status === "failed");
+  const hasDone = jobs.some((j) => ["completed", "failed", "cancelled"].includes(j.status));
 
   return (
     <div className="fixed inset-0 z-50 flex justify-end bg-black/45 backdrop-blur-sm" onClick={onClose}>
@@ -127,15 +130,60 @@ export function QueueDrawer({ open, jobs, onClose, onClearCompleted }: QueueDraw
                   <div className="h-[3px] w-full overflow-hidden rounded-full bg-white/10">
                     <div
                       className={`h-full rounded-full transition-all duration-300 ${
-                        job.status === "failed"
+                        job.status === "failed" || job.status === "cancelled"
                           ? "bg-red-500"
-                          : job.status === "completed"
-                            ? "bg-[#30d158]"
-                            : "progress-bloom bg-[#0a84ff]"
+                          : job.status === "paused"
+                            ? "bg-amber-400"
+                            : job.status === "completed"
+                              ? "bg-emerald-400"
+                              : "progress-bloom bg-[var(--mv-primary)]"
                       }`}
                       style={{ width: `${Math.max(4, job.percent)}%` }}
                     />
                   </div>
+
+                  {/* Pause / Resume / Cancel Controls */}
+                  {["queued", "downloading", "processing", "paused"].includes(job.status) && (
+                    <div className="flex items-center gap-2 pt-1">
+                      {(job.status === "queued" || job.status === "downloading") && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await pauseQueueJob(job.job_id);
+                            onRefreshQueue?.();
+                          }}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-amber-400/35 bg-amber-500/15 px-3 py-1.5 text-[11px] font-medium text-amber-200 transition hover:bg-amber-500/25"
+                        >
+                          <Pause className="h-3 w-3" />
+                          Pause
+                        </button>
+                      )}
+                      {job.status === "paused" && (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            await resumeQueueJob(job.job_id);
+                            onRefreshQueue?.();
+                          }}
+                          className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-cyan-400/40 bg-cyan-500/20 px-3 py-1.5 text-[11px] font-semibold text-cyan-200 transition hover:bg-cyan-500/30"
+                        >
+                          <Play className="h-3 w-3 fill-current" />
+                          Resume
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await cancelQueueJob(job.job_id);
+                          onRefreshQueue?.();
+                        }}
+                        className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-red-400/35 bg-red-500/15 px-3 py-1.5 text-[11px] font-medium text-red-200 transition hover:bg-red-500/25"
+                      >
+                        <XCircle className="h-3 w-3" />
+                        Cancel
+                      </button>
+                    </div>
+                  )}
 
                   {job.status === "completed" && job.media_id && (
                     <div className="space-y-2 pt-1">

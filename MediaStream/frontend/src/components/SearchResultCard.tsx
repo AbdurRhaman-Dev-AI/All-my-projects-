@@ -11,11 +11,23 @@ interface SearchResultCardProps {
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
-  video: "bg-cyan-500/20 text-cyan-300 border-cyan-400/30",
-  anime: "bg-emerald-500/20 text-emerald-300 border-emerald-400/30",
-  tv: "bg-sky-500/20 text-sky-300 border-sky-400/30",
-  archive: "bg-teal-500/20 text-teal-200 border-teal-400/30",
+  video: "bg-cyan-500/20 text-cyan-200 border-cyan-400/35",
+  music: "bg-teal-500/20 text-teal-200 border-teal-400/35",
+  movie: "bg-sky-500/20 text-sky-200 border-sky-400/35",
+  anime: "bg-emerald-500/20 text-emerald-200 border-emerald-400/35",
+  tv: "bg-indigo-500/20 text-indigo-200 border-indigo-400/35",
+  hentai: "bg-rose-500/25 text-rose-200 border-rose-400/40",
+  archive: "bg-cyan-600/20 text-cyan-100 border-cyan-400/30",
 };
+
+function formatDuration(sec: number | null): string | null {
+  if (!sec || sec <= 0) return null;
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) return `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
 
 export function SearchResultCard({
   item,
@@ -78,9 +90,9 @@ export function SearchResultCard({
               {item.rating}
             </span>
           )}
-          {item.duration && (
+          {formatDuration(item.duration) && (
             <span className="rounded-md bg-black/75 px-1.5 py-0.5 font-mono-meta text-[10px] text-white backdrop-blur-sm">
-              {item.duration}
+              {formatDuration(item.duration)}
             </span>
           )}
         </div>

@@ -1,42 +1,41 @@
 @import "tailwindcss";
 
 :root {
-  /* Aurora Oceanic Dark Frosted Glass (Google Stitch Design System) */
-  --mv-bg: #04161c;
-  --mv-bg-radial-1: rgba(0, 229, 195, 0.16);
-  --mv-bg-radial-2: rgba(6, 182, 212, 0.14);
-  --mv-bg-radial-3: rgba(69, 248, 133, 0.08);
-  --mv-surface: rgba(16, 34, 40, 0.68);
-  --mv-surface-elevated: rgba(27, 44, 51, 0.82);
-  --mv-surface-lowest: #011016;
-  --mv-text: #d3e6ee;
-  --mv-text-muted: #b9cac4;
-  --mv-text-subtle: #84948f;
-  --mv-border: rgba(112, 255, 224, 0.14);
-  --mv-rim: inset 0 1px 0 0 rgba(206, 237, 246, 0.16);
-  --mv-primary: #00e5c3;
-  --mv-primary-soft: #70ffe0;
+  /* OmniSave Deep Emerald -> Midnight Navy & Cyan/Aqua Glow */
+  --mv-bg: #040d15;
+  --mv-bg-radial-1: rgba(6, 182, 164, 0.28);
+  --mv-bg-radial-2: rgba(12, 74, 110, 0.22);
+  --mv-bg-radial-3: rgba(0, 229, 195, 0.10);
+  --mv-surface: rgba(8, 22, 34, 0.72);
+  --mv-surface-elevated: rgba(11, 29, 44, 0.88);
+  --mv-surface-lowest: #030a11;
+  --mv-text: #f0f9ff;
+  --mv-text-muted: #b6cedc;
+  --mv-text-subtle: #7997a8;
+  --mv-border: rgba(34, 211, 238, 0.16);
+  --mv-rim: inset 0 1px 0 0 rgba(165, 243, 252, 0.14);
+  --mv-primary: #06e2cc;
+  --mv-primary-soft: #67f8e8;
   --mv-secondary: #06b6d4;
-  --mv-tertiary: #45f885;
+  --mv-tertiary: #34d399;
   --mv-error: #ffb4ab;
 }
 
 html.light {
-  /* Bright Coastal Glass */
-  --mv-bg: #eef7f9;
-  --mv-bg-radial-1: rgba(0, 200, 175, 0.14);
-  --mv-bg-radial-2: rgba(6, 182, 212, 0.12);
+  --mv-bg: #eef8fa;
+  --mv-bg-radial-1: rgba(6, 182, 164, 0.16);
+  --mv-bg-radial-2: rgba(14, 165, 233, 0.12);
   --mv-bg-radial-3: rgba(16, 185, 129, 0.08);
-  --mv-surface: rgba(255, 255, 255, 0.78);
-  --mv-surface-elevated: rgba(255, 255, 255, 0.92);
-  --mv-surface-lowest: #e2f1f4;
-  --mv-text: #062129;
-  --mv-text-muted: #284b54;
-  --mv-text-subtle: #567982;
-  --mv-border: rgba(0, 128, 118, 0.14);
-  --mv-rim: inset 0 1px 0 0 rgba(255, 255, 255, 0.9);
-  --mv-primary: #009c86;
-  --mv-primary-soft: #007766;
+  --mv-surface: rgba(255, 255, 255, 0.8);
+  --mv-surface-elevated: rgba(255, 255, 255, 0.94);
+  --mv-surface-lowest: #e1f1f5;
+  --mv-text: #07202e;
+  --mv-text-muted: #294c5c;
+  --mv-text-subtle: #5a7b8c;
+  --mv-border: rgba(6, 148, 162, 0.16);
+  --mv-rim: inset 0 1px 0 0 rgba(255, 255, 255, 0.92);
+  --mv-primary: #00a396;
+  --mv-primary-soft: #007a70;
   --mv-secondary: #0891b2;
   --mv-tertiary: #16a34a;
   --mv-error: #dc2626;
@@ -45,9 +44,9 @@ html.light {
 body {
   background-color: var(--mv-bg);
   background-image:
-    radial-gradient(65rem 42rem at 12% -8%, var(--mv-bg-radial-1), transparent 60%),
-    radial-gradient(55rem 38rem at 88% 0%, var(--mv-bg-radial-2), transparent 55%),
-    radial-gradient(45rem 32rem at 50% 105%, var(--mv-bg-radial-3), transparent 60%);
+    radial-gradient(68rem 44rem at 0% 0%, var(--mv-bg-radial-1), transparent 58%),
+    radial-gradient(58rem 40rem at 100% 10%, var(--mv-bg-radial-2), transparent 55%),
+    radial-gradient(50rem 34rem at 50% 100%, var(--mv-bg-radial-3), transparent 60%);
   background-attachment: fixed;
   color: var(--mv-text);
   font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
@@ -59,7 +58,7 @@ body {
   backdrop-filter: blur(28px) saturate(165%);
   -webkit-backdrop-filter: blur(28px) saturate(165%);
   border: 1px solid var(--mv-border);
-  box-shadow: var(--mv-rim), 0 12px 32px rgba(1, 16, 22, 0.28);
+  box-shadow: var(--mv-rim), 0 14px 36px rgba(2, 8, 16, 0.36);
 }
 
 .liquid-glass-elevated {
@@ -67,11 +66,11 @@ body {
   backdrop-filter: blur(36px) saturate(185%);
   -webkit-backdrop-filter: blur(36px) saturate(185%);
   border: 1px solid var(--mv-border);
-  box-shadow: var(--mv-rim), 0 24px 64px rgba(1, 16, 22, 0.45);
+  box-shadow: var(--mv-rim), 0 24px 64px rgba(2, 8, 16, 0.54);
 }
 
 .aurora-glow {
-  box-shadow: 0 0 28px rgba(0, 229, 195, 0.28), 0 8px 24px rgba(6, 182, 212, 0.2);
+  box-shadow: 0 0 28px rgba(6, 226, 204, 0.32), 0 8px 24px rgba(6, 182, 212, 0.22);
 }
 
 .font-mono-meta {
@@ -79,5 +78,5 @@ body {
 }
 
 .progress-bloom {
-  box-shadow: 0 0 12px rgba(0, 229, 195, 0.72);
+  box-shadow: 0 0 12px rgba(6, 226, 204, 0.75);
 }

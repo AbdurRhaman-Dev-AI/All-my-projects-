@@ -63,6 +63,16 @@ app.add_middleware(
 )
 
 
+@app.get("/")
+async def root() -> dict[str, str]:
+    return {
+        "service": "MediaStream API",
+        "status": "ok",
+        "docs": "/docs",
+        "health": "/api/health",
+    }
+
+
 @app.get("/api/health")
 async def health() -> dict[str, str]:
     return {"status": "ok", "service": "mediastream-api"}
@@ -70,7 +80,7 @@ async def health() -> dict[str, str]:
 
 @app.get("/api/search", response_model=list[SearchResultItem])
 async def search_media(
-    q: str = Query(..., min_length=1),
+    q: str = Query(default=""),
     category: str = Query(default="all"),
     safe_mode: bool = Query(default=True),
     db: AsyncSession = Depends(get_db),
@@ -199,6 +209,30 @@ async def get_queue() -> list[QueueJob]:
 async def clear_completed_queue() -> dict[str, int]:
     removed = download_manager.clear_completed()
     return {"removed": removed}
+
+
+@app.post("/api/queue/{job_id}/pause", response_model=QueueJob)
+async def pause_queue_job(job_id: str) -> QueueJob:
+    job = download_manager.pause_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Queue job not found")
+    return job
+
+
+@app.post("/api/queue/{job_id}/resume", response_model=QueueJob)
+async def resume_queue_job(job_id: str) -> QueueJob:
+    job = download_manager.resume_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Queue job not found")
+    return job
+
+
+@app.post("/api/queue/{job_id}/cancel", response_model=QueueJob)
+async def cancel_queue_job(job_id: str) -> QueueJob:
+    job = download_manager.cancel_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Queue job not found")
+    return job
 
 
 @app.get("/api/media/stats", response_model=LibraryStats)

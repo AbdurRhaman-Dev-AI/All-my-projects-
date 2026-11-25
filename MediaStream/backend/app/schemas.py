@@ -20,7 +20,7 @@ FormatPreset = Literal[
     "audio_mp3_128",
     "original_images",
 ]
-QueueStatus = Literal["queued", "downloading", "processing", "completed", "failed"]
+QueueStatus = Literal["queued", "downloading", "processing", "paused", "completed", "failed", "cancelled"]
 
 
 class InspectRequest(BaseModel):
@@ -151,7 +151,7 @@ class SearchResultItem(BaseModel):
     id: str
     title: str
     subtitle: str
-    category: Literal["video", "anime", "tv", "archive"]
+    category: Literal["video", "music", "anime", "tv", "movie", "hentai", "archive"]
     platform: str
     source_domain: str
     site_name: str

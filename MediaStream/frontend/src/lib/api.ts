@@ -151,13 +151,25 @@ export async function deleteMediaItem(id: string): Promise<void> {
   await apiFetch(`/api/media/${id}`, { method: "DELETE" });
 }
 
+export async function pauseQueueJob(jobId: string): Promise<QueueJob> {
+  return apiFetch<QueueJob>(`/api/queue/${jobId}/pause`, { method: "POST" });
+}
+
+export async function resumeQueueJob(jobId: string): Promise<QueueJob> {
+  return apiFetch<QueueJob>(`/api/queue/${jobId}/resume`, { method: "POST" });
+}
+
+export async function cancelQueueJob(jobId: string): Promise<QueueJob> {
+  return apiFetch<QueueJob>(`/api/queue/${jobId}/cancel`, { method: "POST" });
+}
+
 export async function searchCatalog(params: {
-  q: string;
+  q?: string;
   category?: string;
   safeMode?: boolean;
 }): Promise<SearchResultItem[]> {
   const sp = new URLSearchParams();
-  sp.set("q", params.q);
+  sp.set("q", params.q ?? "");
   if (params.category) sp.set("category", params.category);
   sp.set("safe_mode", String(params.safeMode ?? true));
   return apiFetch<SearchResultItem[]>(`/api/search?${sp.toString()}`, { cache: "no-store" });

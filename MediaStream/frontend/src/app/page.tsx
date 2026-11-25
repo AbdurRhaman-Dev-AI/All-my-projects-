@@ -65,13 +65,18 @@ const SUPPORTED_SHOWCASE = [
   { platform: "twitter", domain: "x.com", label: "X / Twitter" },
 ];
 
-const DISCOVER_CATEGORIES = [
+type DiscoverCategory = "all" | "movie" | "tv" | "anime" | "music" | "video" | "archive" | "hentai";
+
+const DISCOVER_CATEGORIES: { id: DiscoverCategory; label: string; adultOnly?: boolean }[] = [
   { id: "all", label: "All Sources" },
-  { id: "video", label: "Videos" },
-  { id: "anime", label: "Anime" },
+  { id: "movie", label: "Movies" },
   { id: "tv", label: "TV Shows" },
+  { id: "anime", label: "Anime" },
+  { id: "music", label: "Music" },
+  { id: "video", label: "Videos" },
   { id: "archive", label: "Public Archive" },
-] as const;
+  { id: "hentai", label: "Hentai 18+", adultOnly: true },
+];
 
 const QUICK_TOPICS = ["Lofi Beats", "Cyberpunk", "Attack on Titan", "Breaking Bad", "Space Documentary"];
 
@@ -87,7 +92,7 @@ export default function HomePage() {
 
   // Discover & Search state
   const [discoverQuery, setDiscoverQuery] = useState("");
-  const [discoverCategory, setDiscoverCategory] = useState<"all" | "video" | "anime" | "tv" | "archive">("all");
+  const [discoverCategory, setDiscoverCategory] = useState<DiscoverCategory>("all");
   const [safeMode, setSafeMode] = useState(true);
   const [blurAdult, setBlurAdult] = useState(true);
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -228,12 +233,15 @@ export default function HomePage() {
   );
 
   const handleDiscoverSearch = useCallback(
-    async (overrideQuery?: string, overrideCat?: "all" | "video" | "anime" | "tv" | "archive") => {
+    async (
+      overrideQuery?: string,
+      overrideCat?: DiscoverCategory,
+      overrideSafe?: boolean
+    ) => {
       const q = (overrideQuery ?? discoverQuery).trim();
-      if (!q) return;
 
       // If user pasted a direct URL into the Discover bar, inspect it directly
-      if (q.startsWith("http://") || q.startsWith("https://")) {
+      if (q && (q.startsWith("http://") || q.startsWith("https://"))) {
         setShowSuggestions(false);
         setUrlInput(q);
         await handleInspect(q, false);
@@ -241,13 +249,14 @@ export default function HomePage() {
       }
 
       const cat = overrideCat ?? discoverCategory;
-      setDiscoverQuery(q);
+      const effectiveSafe = overrideSafe ?? safeMode;
+      if (overrideQuery !== undefined) setDiscoverQuery(q);
       setShowSuggestions(false);
       setSearchingCatalog(true);
       setSearchError(null);
       setHasSearched(true);
       try {
-        const results = await searchCatalog({ q, category: cat, safeMode });
+        const results = await searchCatalog({ q, category: cat, safeMode: effectiveSafe });
         setSearchResults(results);
       } catch (err) {
         setSearchError(err instanceof Error ? err.message : "Search failed.");
@@ -257,6 +266,12 @@ export default function HomePage() {
     },
     [discoverQuery, discoverCategory, safeMode, handleInspect]
   );
+
+  // Auto-load Trending / Featured items on initial mount so sections are never empty
+  useEffect(() => {
+    handleDiscoverSearch("", "all", true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleForceDirectDownload = async () => {
     const target = forceUrl.trim();
@@ -392,7 +407,7 @@ export default function HomePage() {
   };
 
   const activeJobsCount = queue.filter((j) =>
-    ["queued", "downloading", "processing"].includes(j.status)
+    ["queued", "downloading", "processing", "paused"].includes(j.status)
   ).length;
 
   const platformFilters = stats?.platforms ?? [];
@@ -675,15 +690,13 @@ export default function HomePage() {
 
                 {/* Category Tabs + Safe Mode / Blur 18+ */}
                 <div className="mt-5 flex flex-wrap items-center justify-center gap-2">
-                  {DISCOVER_CATEGORIES.map((cat) => (
+                  {DISCOVER_CATEGORIES.filter((c) => !c.adultOnly || !safeMode).map((cat) => (
                     <button
                       key={cat.id}
                       type="button"
                       onClick={() => {
                         setDiscoverCategory(cat.id);
-                        if (discoverQuery.trim()) {
-                          handleDiscoverSearch(discoverQuery, cat.id);
-                        }
+                        handleDiscoverSearch(discoverQuery, cat.id, safeMode);
                       }}
                       className={`rounded-full px-3.5 py-1.5 text-xs font-medium transition ${
                         discoverCategory === cat.id
@@ -699,7 +712,13 @@ export default function HomePage() {
 
                   <button
                     type="button"
-                    onClick={() => setSafeMode((v) => !v)}
+                    onClick={() => {
+                      const nextSafe = !safeMode;
+                      setSafeMode(nextSafe);
+                      const nextCat = nextSafe && discoverCategory === "hentai" ? "all" : discoverCategory;
+                      if (nextCat !== discoverCategory) setDiscoverCategory(nextCat);
+                      handleDiscoverSearch(discoverQuery, nextCat, nextSafe);
+                    }}
                     className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                       safeMode
                         ? "border-emerald-400/40 bg-emerald-500/15 text-emerald-300"
@@ -767,7 +786,9 @@ export default function HomePage() {
                 <section className="space-y-4">
                   <div className="flex items-center justify-between">
                     <h3 className="text-sm font-semibold text-[var(--mv-text)]">
-                      Results for &ldquo;{discoverQuery}&rdquo; ({searchResults.length})
+                      {discoverQuery.trim()
+                        ? `Results for "${discoverQuery}" (${searchResults.length})`
+                        : `Trending & Featured (${searchResults.length})`}
                     </h3>
                   </div>
                   <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
@@ -983,6 +1004,7 @@ export default function HomePage() {
         jobs={queue}
         onClose={() => setQueueOpen(false)}
         onClearCompleted={handleClearQueue}
+        onRefreshQueue={loadQueue}
       />
 
       <BatchModal

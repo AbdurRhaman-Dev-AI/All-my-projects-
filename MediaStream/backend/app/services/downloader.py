@@ -42,19 +42,80 @@ AUDIO_BITRATES: dict[str, str] = {
 }
 
 
+class _JobControlSignal(Exception):
+    def __init__(self, action: str) -> None:
+        super().__init__(action)
+        self.action = action
+
+
 class DownloadManager:
     def __init__(self) -> None:
         self.jobs: dict[str, QueueJob] = {}
         self._tasks: dict[str, asyncio.Task[None]] = {}
+        self._requests: dict[str, DownloadRequest] = {}
+        self._media_ids: dict[str, str] = {}
+        self._control: dict[str, str] = {}
+        self._procs: dict[str, asyncio.subprocess.Process] = {}
 
     def list_jobs(self) -> list[QueueJob]:
         return sorted(self.jobs.values(), key=lambda j: j.created_at, reverse=True)
 
     def clear_completed(self) -> int:
-        to_remove = [jid for jid, job in self.jobs.items() if job.status in ("completed", "failed")]
+        to_remove = [jid for jid, job in self.jobs.items() if job.status in ("completed", "failed", "cancelled")]
         for jid in to_remove:
             self.jobs.pop(jid, None)
+            self._requests.pop(jid, None)
+            self._media_ids.pop(jid, None)
+            self._control.pop(jid, None)
         return len(to_remove)
+
+    def pause_job(self, job_id: str) -> Optional[QueueJob]:
+        job = self.jobs.get(job_id)
+        if not job:
+            return None
+        if job.status in ("queued", "downloading"):
+            self._control[job_id] = "pause"
+            proc = self._procs.get(job_id)
+            if proc and proc.returncode is None:
+                proc.terminate()
+            job.status = "paused"
+            job.speed = None
+            job.eta = None
+        return job
+
+    def cancel_job(self, job_id: str) -> Optional[QueueJob]:
+        job = self.jobs.get(job_id)
+        if not job:
+            return None
+        if job.status in ("queued", "downloading", "processing", "paused"):
+            was_paused = job.status == "paused"
+            self._control[job_id] = "cancel"
+            proc = self._procs.get(job_id)
+            if proc and proc.returncode is None:
+                proc.terminate()
+            job.status = "cancelled"
+            job.speed = None
+            job.eta = None
+            if was_paused:
+                media_id = self._media_ids.get(job_id)
+                if media_id:
+                    shutil.rmtree(settings.media_path / media_id, ignore_errors=True)
+        return job
+
+    def resume_job(self, job_id: str) -> Optional[QueueJob]:
+        job = self.jobs.get(job_id)
+        req = self._requests.get(job_id)
+        if not job or not req:
+            return None
+        if job.status in ("paused", "failed"):
+            self._control.pop(job_id, None)
+            job.status = "queued"
+            job.error = None
+            job.speed = None
+            job.eta = None
+            task = asyncio.create_task(self._process_job(job_id, req))
+            self._tasks[job_id] = task
+        return job
 
     def enqueue(self, req: DownloadRequest) -> QueueJob:
         job_id = str(uuid.uuid4())
@@ -79,6 +140,8 @@ class DownloadManager:
             created_at=datetime.now(timezone.utc),
         )
         self.jobs[job_id] = job
+        self._requests[job_id] = req
+        self._media_ids[job_id] = str(uuid.uuid4())
         task = asyncio.create_task(self._process_job(job_id, req))
         self._tasks[job_id] = task
         return job
@@ -202,6 +265,9 @@ class DownloadManager:
         loop: asyncio.AbstractEventLoop,
     ) -> tuple[dict[str, Any], list[Path]]:
         def progress_hook(d: dict[str, Any]) -> None:
+            ctrl = self._control.get(job.job_id)
+            if ctrl in ("pause", "cancel"):
+                raise _JobControlSignal(ctrl)
             status = d.get("status")
             if status == "downloading":
                 total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
@@ -280,12 +346,14 @@ class DownloadManager:
 
     async def _process_job(self, job_id: str, req: DownloadRequest) -> None:
         job = self.jobs[job_id]
-        media_id = str(uuid.uuid4())
+        media_id = self._media_ids.setdefault(job_id, str(uuid.uuid4()))
         target_dir = settings.media_path / media_id
         target_dir.mkdir(parents=True, exist_ok=True)
         loop = asyncio.get_running_loop()
 
         try:
+            if self._control.get(job_id) in ("pause", "cancel"):
+                raise _JobControlSignal(self._control[job_id])
             job.status = "downloading"
             download_url = job.url
             effective_referer = req.referer
@@ -415,7 +483,28 @@ class DownloadManager:
             job.speed = None
             job.eta = None
 
+        except _JobControlSignal as sig:
+            job.speed = None
+            job.eta = None
+            if sig.action == "pause":
+                job.status = "paused"
+            else:
+                shutil.rmtree(target_dir, ignore_errors=True)
+                job.status = "cancelled"
+
         except Exception as exc:
+            ctrl = self._control.get(job_id)
+            if ctrl == "pause":
+                job.status = "paused"
+                job.speed = None
+                job.eta = None
+                return
+            if ctrl == "cancel":
+                shutil.rmtree(target_dir, ignore_errors=True)
+                job.status = "cancelled"
+                job.speed = None
+                job.eta = None
+                return
             shutil.rmtree(target_dir, ignore_errors=True)
             job.status = "failed"
             job.error = classify_error(str(exc))
