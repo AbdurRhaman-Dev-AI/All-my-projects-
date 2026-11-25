@@ -34,6 +34,8 @@ def detect_site_info(url: str) -> tuple[str, str, str]:
         return "reddit", "reddit.com", "Reddit"
     if "vimeo.com" in host:
         return "vimeo", "vimeo.com", "Vimeo"
+    if "hanime.tv" in host:
+        return "hanime", "hanime.tv", "Hanime"
     if "missav" in host:
         return "missav", host, "MissAV"
 
@@ -451,6 +453,125 @@ async def _inspect_with_gallery_dl(url: str) -> Optional[list[Any]]:
     return entries
 
 
+AD_HOST_KEYWORDS = (
+    "velvetloom",
+    "doubleclick",
+    "googlesyndication",
+    "googleadservices",
+    "magsrv",
+    "juicyads",
+    "exoclick",
+    "trafficjunky",
+    "mjedge",
+    "adserver",
+    "popads",
+)
+
+
+async def _playwright_scan_media(
+    url: str,
+    referer: Optional[str] = None,
+) -> tuple[list[str], Optional[str], Optional[str]]:
+    """
+    Renders a non-challenged JS SPA webpage in headless Chrome/Edge to capture dynamic
+    HLS (.m3u8 / application/x-mpegurl) or video (.mp4/.webm) stream responses.
+    Aborts immediately if any CAPTCHA or Cloudflare anti-bot challenge is detected.
+    """
+    try:
+        from playwright.async_api import async_playwright
+    except ImportError:
+        return [], None, None
+
+    hls_candidates: list[str] = []
+    video_candidates: list[str] = []
+    page_host = (urlparse(url).hostname or "").lower().removeprefix("www.")
+
+    async with async_playwright() as p:
+        browser = None
+        for channel in ("chrome", "msedge", None):
+            try:
+                browser = await p.chromium.launch(
+                    headless=True,
+                    **({"channel": channel} if channel else {}),
+                )
+                break
+            except Exception:
+                continue
+        if browser is None:
+            return [], None, None
+
+        try:
+            context = await browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                    "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                ),
+                extra_http_headers={"Referer": referer} if referer else {},
+            )
+            page = await context.new_page()
+
+            def on_response(res: Any) -> None:
+                try:
+                    if res.status not in (200, 206):
+                        return
+                    req_url = res.url
+                    lower_u = req_url.lower()
+                    if any(ad in lower_u for ad in AD_HOST_KEYWORDS):
+                        return
+                    ct = (res.headers.get("content-type") or "").lower()
+                    if "mpegurl" in ct or ".m3u8" in lower_u:
+                        if req_url not in hls_candidates:
+                            hls_candidates.append(req_url)
+                    elif ct.startswith("video/") or re.search(r"\.(mp4|webm|mov)(\?|$)", lower_u):
+                        cl = res.headers.get("content-length")
+                        # Ignore tiny probe clips under 300 KB
+                        if cl and cl.isdigit() and int(cl) < 300_000:
+                            return
+                        if req_url not in video_candidates:
+                            video_candidates.append(req_url)
+                except Exception:
+                    pass
+
+            page.on("response", on_response)
+            await page.goto(url, wait_until="domcontentloaded", timeout=20_000)
+            await page.wait_for_timeout(5500)
+
+            page_title = (await page.title() or "").strip()
+            body_text = (await page.evaluate("() => (document.body?.innerText || '').slice(0, 2500)") or "").lower()
+            combined_check = f"{page_title.lower()} {body_text}"
+            if any(
+                k in combined_check
+                for k in ("just a moment", "attention required", "verify you are human", "cloudflare", "turnstile", "recaptcha", "hcaptcha")
+            ):
+                raise RuntimeError(classify_error("cloudflare anti-bot challenge"))
+
+            meta = await page.evaluate(
+                """() => {
+                    const ogImg = document.querySelector('meta[property="og:image"]')?.getAttribute('content');
+                    const ogTitle = document.querySelector('meta[property="og:title"]')?.getAttribute('content');
+                    const poster = document.querySelector('video')?.getAttribute('poster');
+                    const vidSrcs = Array.from(document.querySelectorAll('video, video source'))
+                        .map(el => el.getAttribute('src') || el.currentSrc || '')
+                        .filter(s => s && /^https?:\\/\\//i.test(s));
+                    return { ogImg, ogTitle, poster, vidSrcs };
+                }"""
+            )
+            for s in meta.get("vidSrcs") or []:
+                if not any(ad in s.lower() for ad in AD_HOST_KEYWORDS) and s not in video_candidates:
+                    video_candidates.append(s)
+
+            # Prefer same-origin HLS streams first
+            same_host_hls = [u for u in hls_candidates if page_host and page_host in u.lower()]
+            ordered = [*same_host_hls, *[u for u in hls_candidates if u not in same_host_hls], *video_candidates]
+            resolved_title = (meta.get("ogTitle") or page_title or "").strip()[:300] or None
+            resolved_thumb = meta.get("ogImg") or meta.get("poster")
+            if resolved_thumb:
+                resolved_thumb = urljoin(url, resolved_thumb)
+            return ordered, resolved_title, resolved_thumb
+        finally:
+            await browser.close()
+
+
 async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> InspectResponse:
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
@@ -545,12 +666,20 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
                 candidates.append(resolved)
 
     if not candidates:
+        pw_candidates, pw_title, pw_thumb = await _playwright_scan_media(url, referer=referer)
+        candidates.extend(pw_candidates)
+        if pw_title and (not caption or caption == "Embedded Media"):
+            caption = pw_title
+        if pw_thumb and not thumb:
+            thumb = pw_thumb
+
+    if not candidates:
         raise RuntimeError(
             "No playable video or .m3u8/.mp4 stream URL was found in this page's HTML. "
             "If the player loads streams dynamically or requires login, paste the direct .m3u8/.mp4 stream URL or add cookies.txt."
         )
 
-    stream_url = next((c for c in candidates if ".m3u8" in c.lower()), candidates[0])
+    stream_url = next((c for c in candidates if ".m3u8" in c.lower() or "/hls/" in c.lower()), candidates[0])
     yt_stream = await _inspect_with_ytdlp(stream_url, referer=referer or url)
     if yt_stream and "_error" not in yt_stream:
         return InspectResponse(

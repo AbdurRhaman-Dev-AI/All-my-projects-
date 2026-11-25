@@ -37,6 +37,7 @@ def _infer_domain_and_name(url: str, platform: str) -> tuple[str, str, str]:
         "tiktok": ("tiktok.com", "TikTok"),
         "reddit": ("reddit.com", "Reddit"),
         "vimeo": ("vimeo.com", "Vimeo"),
+        "hanime": ("hanime.tv", "Hanime"),
         "missav": ("missav.ws", "MissAV"),
     }
     if platform in known:

@@ -11,6 +11,7 @@ const DEFAULT_NAMES: Record<string, string> = {
   tiktok: "TikTok",
   reddit: "Reddit",
   vimeo: "Vimeo",
+  hanime: "Hanime",
   missav: "MissAV",
   other: "Web",
 };

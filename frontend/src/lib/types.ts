@@ -62,6 +62,7 @@ export interface DownloadRequest {
   export_dir?: string | null;
   save_to_export_dir?: boolean;
   download_subtitles?: boolean;
+  force_mode?: boolean;
   referer?: string | null;
 }
 

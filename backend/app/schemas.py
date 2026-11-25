@@ -75,6 +75,7 @@ class DownloadRequest(BaseModel):
     export_dir: Optional[str] = None
     save_to_export_dir: bool = True
     download_subtitles: bool = False
+    force_mode: bool = False
     referer: Optional[str] = None
 
 

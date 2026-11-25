@@ -14,7 +14,7 @@ from app.config import find_ffmpeg_executable, settings
 from app.database import async_session_factory
 from app.models import MediaItem
 from app.schemas import BatchDownloadRequest, DownloadRequest, FormatPreset, MediaType, QueueJob
-from app.services.inspector import classify_error, detect_site_info
+from app.services.inspector import _force_scan_page_media, classify_error, detect_site_info
 
 
 FORMAT_SELECTORS: dict[FormatPreset, str] = {
@@ -280,31 +280,47 @@ class DownloadManager:
 
         try:
             job.status = "downloading"
+            download_url = job.url
+            effective_referer = req.referer
+            if req.force_mode:
+                try:
+                    resolved = await _force_scan_page_media(job.url, referer=req.referer)
+                    download_url = resolved.resolved_stream_url or resolved.url
+                    effective_referer = resolved.referer or req.referer
+                    if resolved.caption:
+                        job.caption = resolved.caption[:200]
+                    if resolved.thumbnail_url:
+                        job.thumbnail_url = resolved.thumbnail_url
+                    if resolved.creator:
+                        job.creator = resolved.creator
+                except Exception:
+                    pass
+
             info: dict[str, Any] = {}
             files: list[Path] = []
 
             if req.format_id == "original_images" or req.media_type in ("image", "carousel"):
                 try:
-                    files = await self._download_with_gallery_dl(job.url, target_dir)
+                    files = await self._download_with_gallery_dl(download_url, target_dir)
                 except Exception:
                     info, files = await asyncio.to_thread(
                         self._run_ytdlp_sync,
-                        job.url,
+                        download_url,
                         target_dir,
                         req.format_id,
                         req.download_subtitles,
-                        req.referer,
+                        effective_referer,
                         job,
                         loop,
                     )
             else:
                 info, files = await asyncio.to_thread(
                     self._run_ytdlp_sync,
-                    job.url,
+                    download_url,
                     target_dir,
                     req.format_id,
                     req.download_subtitles,
-                    req.referer,
+                    effective_referer,
                     job,
                     loop,
                 )

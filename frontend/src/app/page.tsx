@@ -190,6 +190,7 @@ export default function HomePage() {
         format_id: "best_mp4",
         tags: ["force-download"],
         notes: forceReferer.trim() ? `Referer: ${forceReferer.trim()}` : "",
+        force_mode: true,
         referer: forceReferer.trim() || undefined,
         export_dir: settingsStatus?.download_dir || undefined,
         save_to_export_dir: settingsStatus?.auto_export ?? true,
