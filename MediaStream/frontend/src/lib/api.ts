@@ -167,11 +167,13 @@ export async function searchCatalog(params: {
   q?: string;
   category?: string;
   safeMode?: boolean;
+  page?: number;
 }): Promise<SearchResultItem[]> {
   const sp = new URLSearchParams();
   sp.set("q", params.q ?? "");
   if (params.category) sp.set("category", params.category);
   sp.set("safe_mode", String(params.safeMode ?? true));
+  if (params.page && params.page > 1) sp.set("page", String(params.page));
   return apiFetch<SearchResultItem[]>(`/api/search?${sp.toString()}`, { cache: "no-store" });
 }
 

@@ -83,9 +83,10 @@ async def search_media(
     q: str = Query(default=""),
     category: str = Query(default="all"),
     safe_mode: bool = Query(default=True),
+    page: int = Query(default=1, ge=1, le=20),
     db: AsyncSession = Depends(get_db),
 ) -> list[SearchResultItem]:
-    results = await search_all(q.strip(), category=category, safe_mode=safe_mode)
+    results = await search_all(q.strip(), category=category, safe_mode=safe_mode, page=page)
     if results:
         urls = [r.url for r in results]
         rows = (await db.execute(select(MediaItem.id, MediaItem.original_url).where(MediaItem.original_url.in_(urls)))).fetchall()

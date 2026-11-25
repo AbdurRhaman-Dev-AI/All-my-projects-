@@ -27,7 +27,7 @@ def _extract_yt_id(url: str) -> Optional[str]:
     return m.group(1) if m else None
 
 
-def _search_youtube_sync(query: str, limit: int = 8, music_mode: bool = False) -> list[SearchResultItem]:
+def _search_youtube_sync(query: str, limit: int = 8, music_mode: bool = False, page: int = 1) -> list[SearchResultItem]:
     q_effective = f"{query} official audio" if music_mode and "music" not in query.lower() else query
     ydl_opts = {
         "quiet": True,
@@ -37,9 +37,11 @@ def _search_youtube_sync(query: str, limit: int = 8, music_mode: bool = False) -
     }
     results: list[SearchResultItem] = []
     try:
+        fetch_count = limit * page
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(f"ytsearch{limit}:{q_effective}", download=False)
-        for entry in (info or {}).get("entries") or []:
+            info = ydl.extract_info(f"ytsearch{fetch_count}:{q_effective}", download=False)
+        entries = ((info or {}).get("entries") or [])[(page - 1) * limit : fetch_count]
+        for entry in entries:
             if not entry:
                 continue
             vid = entry.get("id")
@@ -79,10 +81,13 @@ def _search_youtube_sync(query: str, limit: int = 8, music_mode: bool = False) -
     return results
 
 
-async def _search_hdhub4u(query: str, category: str = "all", limit: int = 10) -> list[SearchResultItem]:
+async def _search_hdhub4u(query: str, category: str = "all", limit: int = 10, page: int = 1) -> list[SearchResultItem]:
     """Search Movies & TV Shows on new16.hdhub4u.cl (or homepage trending when query is empty)."""
     base = "https://new16.hdhub4u.cl"
-    target = f"{base}/?s={quote_plus(query)}" if query.strip() else f"{base}/"
+    if query.strip():
+        target = f"{base}/page/{page}/?s={quote_plus(query)}" if page > 1 else f"{base}/?s={quote_plus(query)}"
+    else:
+        target = f"{base}/page/{page}/" if page > 1 else f"{base}/"
     results: list[SearchResultItem] = []
     try:
         async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=_HEADERS) as client:
@@ -147,10 +152,13 @@ async def _search_hdhub4u(query: str, category: str = "all", limit: int = 10) ->
     return results
 
 
-async def _search_hanime_red(query: str, limit: int = 10) -> list[SearchResultItem]:
+async def _search_hanime_red(query: str, limit: int = 10, page: int = 1) -> list[SearchResultItem]:
     """Search Hentai on hanime.red (only called when safe_mode=False)."""
     base = "https://hanime.red"
-    target = f"{base}/search?q={quote_plus(query)}" if query.strip() else f"{base}/"
+    if query.strip():
+        target = f"{base}/search?q={quote_plus(query)}&page={page}" if page > 1 else f"{base}/search?q={quote_plus(query)}"
+    else:
+        target = f"{base}/?page={page}" if page > 1 else f"{base}/"
     results: list[SearchResultItem] = []
     seen: set[str] = set()
     try:
@@ -212,10 +220,10 @@ async def _search_hanime_red(query: str, limit: int = 10) -> list[SearchResultIt
     return results
 
 
-async def _search_anilist(query: str, safe_mode: bool = True, limit: int = 8) -> list[SearchResultItem]:
+async def _search_anilist(query: str, safe_mode: bool = True, limit: int = 8, page: int = 1) -> list[SearchResultItem]:
     gql = """
-    query ($search: String, $isAdult: Boolean, $perPage: Int) {
-      Page(page: 1, perPage: $perPage) {
+    query ($search: String, $isAdult: Boolean, $perPage: Int, $page: Int) {
+      Page(page: $page, perPage: $perPage) {
         media(search: $search, type: ANIME, isAdult: $isAdult, sort: TRENDING_DESC) {
           id
           title { romaji english }
@@ -232,7 +240,7 @@ async def _search_anilist(query: str, safe_mode: bool = True, limit: int = 8) ->
       }
     }
     """
-    variables: dict[str, Any] = {"perPage": limit}
+    variables: dict[str, Any] = {"perPage": limit, "page": page}
     if query.strip():
         variables["search"] = query.strip()
     if safe_mode:
@@ -282,15 +290,16 @@ async def _search_anilist(query: str, safe_mode: bool = True, limit: int = 8) ->
     return results
 
 
-async def _search_tvmaze(query: str, limit: int = 8) -> list[SearchResultItem]:
+async def _search_tvmaze(query: str, limit: int = 8, page: int = 1) -> list[SearchResultItem]:
     results: list[SearchResultItem] = []
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             if query.strip():
                 resp = await client.get("https://api.tvmaze.com/search/shows", params={"q": query.strip()})
-                raw = [entry.get("show") for entry in (resp.json() or []) if entry.get("show")]
+                all_raw = [entry.get("show") for entry in (resp.json() or []) if entry.get("show")]
+                raw = all_raw[(page - 1) * limit : page * limit]
             else:
-                resp = await client.get("https://api.tvmaze.com/shows", params={"page": 0})
+                resp = await client.get("https://api.tvmaze.com/shows", params={"page": max(0, page - 1)})
                 raw = sorted(resp.json() or [], key=lambda s: (s.get("rating") or {}).get("average") or 0, reverse=True)
         for show in raw[:limit]:
             img = show.get("image") or {}
@@ -322,7 +331,7 @@ async def _search_tvmaze(query: str, limit: int = 8) -> list[SearchResultItem]:
     return results
 
 
-async def _search_archive(query: str, limit: int = 8) -> list[SearchResultItem]:
+async def _search_archive(query: str, limit: int = 8, page: int = 1) -> list[SearchResultItem]:
     q_text = f"({query.strip()}) AND mediatype:(movies)" if query.strip() else "mediatype:(movies) AND collection:(feature_films)"
     results: list[SearchResultItem] = []
     try:
@@ -334,7 +343,7 @@ async def _search_archive(query: str, limit: int = 8) -> list[SearchResultItem]:
                     "fl[]": ["identifier", "title", "year", "description", "downloads"],
                     "sort[]": "downloads desc",
                     "rows": limit,
-                    "page": 1,
+                    "page": page,
                     "output": "json",
                 },
             )
@@ -375,36 +384,36 @@ async def _search_archive(query: str, limit: int = 8) -> list[SearchResultItem]:
     return results
 
 
-async def search_all(query: str, category: str = "all", safe_mode: bool = True) -> list[SearchResultItem]:
+async def search_all(query: str, category: str = "all", safe_mode: bool = True, page: int = 1) -> list[SearchResultItem]:
     q = query.strip()
     tasks = []
 
     if category == "video":
-        tasks.append(asyncio.to_thread(_search_youtube_sync, q or "trending 4k videos", 12, False))
+        tasks.append(asyncio.to_thread(_search_youtube_sync, q or "trending 4k videos", 12, False, page))
     elif category == "music":
-        tasks.append(asyncio.to_thread(_search_youtube_sync, q or "top music hits 2026", 12, True))
+        tasks.append(asyncio.to_thread(_search_youtube_sync, q or "top music hits 2026", 12, True, page))
     elif category == "anime":
-        tasks.append(_search_anilist(q, safe_mode=safe_mode, limit=12))
+        tasks.append(_search_anilist(q, safe_mode=safe_mode, limit=12, page=page))
     elif category == "movie":
-        tasks.append(_search_hdhub4u(q, category="movie", limit=12))
-        tasks.append(_search_archive(q, limit=6))
+        tasks.append(_search_hdhub4u(q, category="movie", limit=12, page=page))
+        tasks.append(_search_archive(q, limit=6, page=page))
     elif category == "tv":
-        tasks.append(_search_hdhub4u(q, category="tv", limit=8))
-        tasks.append(_search_tvmaze(q, limit=8))
+        tasks.append(_search_hdhub4u(q, category="tv", limit=8, page=page))
+        tasks.append(_search_tvmaze(q, limit=8, page=page))
     elif category == "hentai":
         if not safe_mode:
-            tasks.append(_search_hanime_red(q, limit=12))
+            tasks.append(_search_hanime_red(q, limit=12, page=page))
     elif category == "archive":
-        tasks.append(_search_archive(q, limit=12))
+        tasks.append(_search_archive(q, limit=12, page=page))
     else:
         # "all" -> mix Movies/TV (HDHub4u), Anime (AniList), Videos/Music (YouTube), Public Archive, and Hentai if safe_mode=False
-        tasks.append(_search_hdhub4u(q, category="all", limit=6))
-        tasks.append(_search_anilist(q, safe_mode=safe_mode, limit=6))
-        tasks.append(asyncio.to_thread(_search_youtube_sync, q or "trending videos", 6, False))
-        tasks.append(_search_tvmaze(q, limit=4))
-        tasks.append(_search_archive(q, limit=4))
+        tasks.append(_search_hdhub4u(q, category="all", limit=6, page=page))
+        tasks.append(_search_anilist(q, safe_mode=safe_mode, limit=6, page=page))
+        tasks.append(asyncio.to_thread(_search_youtube_sync, q or "trending videos", 6, False, page))
+        tasks.append(_search_tvmaze(q, limit=4, page=page))
+        tasks.append(_search_archive(q, limit=4, page=page))
         if not safe_mode:
-            tasks.append(_search_hanime_red(q, limit=6))
+            tasks.append(_search_hanime_red(q, limit=6, page=page))
 
     if not tasks:
         return []

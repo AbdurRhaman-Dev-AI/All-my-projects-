@@ -98,6 +98,9 @@ export default function HomePage() {
   const [suggestions, setSuggestions] = useState<string[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [searchingCatalog, setSearchingCatalog] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [discoverPage, setDiscoverPage] = useState(1);
+  const [hasMoreResults, setHasMoreResults] = useState(true);
   const [searchResults, setSearchResults] = useState<SearchResultItem[]>([]);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [hasSearched, setHasSearched] = useState(false);
@@ -252,12 +255,15 @@ export default function HomePage() {
       const effectiveSafe = overrideSafe ?? safeMode;
       if (overrideQuery !== undefined) setDiscoverQuery(q);
       setShowSuggestions(false);
+      setDiscoverPage(1);
+      setHasMoreResults(true);
       setSearchingCatalog(true);
       setSearchError(null);
       setHasSearched(true);
       try {
-        const results = await searchCatalog({ q, category: cat, safeMode: effectiveSafe });
+        const results = await searchCatalog({ q, category: cat, safeMode: effectiveSafe, page: 1 });
         setSearchResults(results);
+        setHasMoreResults(results.length >= 6);
       } catch (err) {
         setSearchError(err instanceof Error ? err.message : "Search failed.");
       } finally {
@@ -266,6 +272,35 @@ export default function HomePage() {
     },
     [discoverQuery, discoverCategory, safeMode, handleInspect]
   );
+
+  const handleLoadMore = useCallback(async () => {
+    if (loadingMore || !hasMoreResults) return;
+    const nextPage = discoverPage + 1;
+    setLoadingMore(true);
+    try {
+      const more = await searchCatalog({
+        q: discoverQuery.trim(),
+        category: discoverCategory,
+        safeMode,
+        page: nextPage,
+      });
+      setDiscoverPage(nextPage);
+      if (more.length === 0) {
+        setHasMoreResults(false);
+      } else {
+        setSearchResults((prev) => {
+          const seen = new Set(prev.map((p) => `${p.platform}-${p.id}`));
+          const unique = more.filter((m) => !seen.has(`${m.platform}-${m.id}`));
+          if (unique.length === 0) setHasMoreResults(false);
+          return [...prev, ...unique];
+        });
+      }
+    } catch {
+      // ignore transient error
+    } finally {
+      setLoadingMore(false);
+    }
+  }, [loadingMore, hasMoreResults, discoverPage, discoverQuery, discoverCategory, safeMode]);
 
   // Auto-load Trending / Featured items on initial mount so sections are never empty
   useEffect(() => {
@@ -760,53 +795,7 @@ export default function HomePage() {
               </div>
             </section>
 
-            {/* Search Results Grid */}
-            {searchError && (
-              <div className="rounded-2xl border border-red-400/30 bg-red-500/15 p-4 text-xs text-[#ffb4ab]">
-                {searchError}
-              </div>
-            )}
-
-            {searchingCatalog ? (
-              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
-                  <div key={n} className="liquid-glass h-72 animate-pulse rounded-2xl" />
-                ))}
-              </div>
-            ) : hasSearched && searchResults.length === 0 ? (
-              <div className="liquid-glass flex flex-col items-center justify-center rounded-3xl px-6 py-14 text-center">
-                <Search className="mb-3 h-9 w-9 text-[var(--mv-text-subtle)]" />
-                <p className="text-sm font-medium text-[var(--mv-text)]">No matches found</p>
-                <p className="mt-1 text-xs text-[var(--mv-text-subtle)]">
-                  Try another keyword, switch to &ldquo;All Sources&rdquo;, or paste a direct video URL below.
-                </p>
-              </div>
-            ) : (
-              searchResults.length > 0 && (
-                <section className="space-y-4">
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-semibold text-[var(--mv-text)]">
-                      {discoverQuery.trim()
-                        ? `Results for "${discoverQuery}" (${searchResults.length})`
-                        : `Trending & Featured (${searchResults.length})`}
-                    </h3>
-                  </div>
-                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                    {searchResults.map((item) => (
-                      <SearchResultCard
-                        key={`${item.platform}-${item.id}`}
-                        item={item}
-                        blurAdult={blurAdult}
-                        onWatch={(it) => setWatchingItem(it)}
-                        onDownload={(it) => handleInspect(it.url, false)}
-                      />
-                    ))}
-                  </div>
-                </section>
-              )
-            )}
-
-            {/* Direct URL Downloader Strip */}
+            {/* Direct URL Downloader Strip (Up Top) */}
             <section className="liquid-glass rounded-3xl p-5 sm:p-6">
               <div className="flex flex-col justify-between gap-4 lg:flex-row lg:items-center">
                 <div>
@@ -866,6 +855,72 @@ export default function HomePage() {
                 ))}
               </div>
             </section>
+
+            {/* Search Results Grid */}
+            {searchError && (
+              <div className="rounded-2xl border border-red-400/30 bg-red-500/15 p-4 text-xs text-[#ffb4ab]">
+                {searchError}
+              </div>
+            )}
+
+            {searchingCatalog ? (
+              <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
+                  <div key={n} className="liquid-glass h-72 animate-pulse rounded-2xl" />
+                ))}
+              </div>
+            ) : hasSearched && searchResults.length === 0 ? (
+              <div className="liquid-glass flex flex-col items-center justify-center rounded-3xl px-6 py-14 text-center">
+                <Search className="mb-3 h-9 w-9 text-[var(--mv-text-subtle)]" />
+                <p className="text-sm font-medium text-[var(--mv-text)]">No matches found</p>
+                <p className="mt-1 text-xs text-[var(--mv-text-subtle)]">
+                  Try another keyword, switch to &ldquo;All Sources&rdquo;, or paste a direct video URL above.
+                </p>
+              </div>
+            ) : (
+              searchResults.length > 0 && (
+                <section className="space-y-5">
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-semibold text-[var(--mv-text)]">
+                      {discoverQuery.trim()
+                        ? `Results for "${discoverQuery}" (${searchResults.length})`
+                        : `Trending & Featured (${searchResults.length})`}
+                    </h3>
+                  </div>
+                  <div className="grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                    {searchResults.map((item) => (
+                      <SearchResultCard
+                        key={`${item.platform}-${item.id}`}
+                        item={item}
+                        blurAdult={blurAdult}
+                        onWatch={(it) => setWatchingItem(it)}
+                        onDownload={(it) => handleInspect(it.url, false)}
+                      />
+                    ))}
+                  </div>
+
+                  {hasMoreResults && (
+                    <div className="flex justify-center pt-2">
+                      <button
+                        type="button"
+                        disabled={loadingMore}
+                        onClick={handleLoadMore}
+                        className="aurora-glow inline-flex items-center gap-2 rounded-2xl bg-gradient-to-r from-[#06e2cc] to-[#06b6d4] px-6 py-2.5 text-xs font-bold text-[#00201a] transition hover:brightness-110 disabled:opacity-50"
+                      >
+                        {loadingMore ? (
+                          <>
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                            Loading More...
+                          </>
+                        ) : (
+                          "Load More Results"
+                        )}
+                      </button>
+                    </div>
+                  )}
+                </section>
+              )
+            )}
           </div>
         ) : (
           /* MY LIBRARY TAB */
