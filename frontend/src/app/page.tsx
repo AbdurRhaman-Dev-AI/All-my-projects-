@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Download,
   DownloadCloud,
   FolderCog,
   Link2,
@@ -44,7 +45,9 @@ const FILTER_CHIPS = [
 export default function HomePage() {
   const [urlInput, setUrlInput] = useState("");
   const [forceMode, setForceMode] = useState(false);
+  const [forceUrl, setForceUrl] = useState("");
   const [forceReferer, setForceReferer] = useState("");
+  const [directDownloading, setDirectDownloading] = useState(false);
   const [inspecting, setInspecting] = useState(false);
   const [inspectError, setInspectError] = useState<string | null>(null);
   const [inspected, setInspected] = useState<InspectResponse | null>(null);
@@ -135,20 +138,48 @@ export default function HomePage() {
     [forceMode, forceReferer]
   );
 
+  const handleDirectForceDownload = async () => {
+    const target = (forceUrl || urlInput).trim();
+    if (!target) return;
+    setDirectDownloading(true);
+    setInspectError(null);
+    try {
+      await startDownload({
+        url: target,
+        format_id: "best_mp4",
+        tags: ["force-download"],
+        notes: forceReferer.trim() ? `Referer: ${forceReferer.trim()}` : "",
+        referer: forceReferer.trim() || undefined,
+        export_dir: settingsStatus?.download_dir || undefined,
+        save_to_export_dir: settingsStatus?.auto_export ?? true,
+      });
+      setQueueOpen(true);
+      await loadQueue();
+    } catch (err) {
+      setInspectError(err instanceof Error ? err.message : "Direct force download failed.");
+    } finally {
+      setDirectDownloading(false);
+    }
+  };
+
   useEffect(() => {
     const onPaste = (e: ClipboardEvent) => {
       const activeTag = document.activeElement?.tagName.toLowerCase();
       if (activeTag === "input" || activeTag === "textarea") return;
       const pasted = e.clipboardData?.getData("text")?.trim();
       if (pasted && /^https?:\/\//i.test(pasted)) {
-        setUrlInput(pasted);
-        urlInputRef.current?.focus();
+        if (forceMode) {
+          setForceUrl(pasted);
+        } else {
+          setUrlInput(pasted);
+          urlInputRef.current?.focus();
+        }
         handleInspect(pasted);
       }
     };
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [handleInspect]);
+  }, [handleInspect, forceMode]);
 
   const toggleTheme = () => {
     const next = !isLight;
@@ -180,6 +211,7 @@ export default function HomePage() {
     });
     setInspected(null);
     setUrlInput("");
+    setForceUrl("");
     setQueueOpen(true);
     await loadQueue();
   };
@@ -278,24 +310,16 @@ export default function HomePage() {
               type="url"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              placeholder={
-                forceMode
-                  ? "Force Download: paste webpage, .m3u8, or .mp4 URL..."
-                  : "Paste X, Instagram, Facebook, MissAV, or video URL..."
-              }
+              placeholder="Paste X, Instagram, Facebook, MissAV, or video URL..."
               className="w-full bg-transparent text-sm text-[var(--mv-text)] outline-none placeholder:text-[var(--mv-text-subtle)]"
             />
             <button
               type="submit"
               disabled={inspecting || !urlInput.trim()}
-              className={`inline-flex shrink-0 items-center gap-1.5 rounded-full px-4 py-1.5 text-xs font-semibold text-white shadow-md transition disabled:opacity-50 ${
-                forceMode
-                  ? "bg-[#5e5ce6] shadow-[#5e5ce6]/25 hover:bg-[#7371f0]"
-                  : "bg-[#0a84ff] shadow-[#0a84ff]/25 hover:bg-[#3e90ff]"
-              }`}
+              className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#0a84ff] px-4 py-1.5 text-xs font-semibold text-white shadow-md shadow-[#0a84ff]/25 transition hover:bg-[#3e90ff] disabled:opacity-50"
             >
               {inspecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              {inspecting ? "Scanning" : forceMode ? "Force Inspect" : "Inspect"}
+              {inspecting ? "Inspecting" : "Inspect"}
             </button>
           </form>
 
@@ -304,7 +328,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => setForceMode((v) => !v)}
-              title="Force Download Mode: scan any page HTML for <video>/.m3u8/.mp4 streams"
+              title="Open Force Download Section"
               className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition ${
                 forceMode
                   ? "border-[#5e5ce6] bg-[#5e5ce6]/25 text-white"
@@ -352,25 +376,55 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* Force Download Section Banner */}
+        {/* Dedicated Force Download Section */}
         {forceMode && (
-          <div className="liquid-glass mx-auto mt-3 flex max-w-7xl flex-col gap-2.5 rounded-2xl border-[#5e5ce6]/40 p-4 sm:flex-row sm:items-center sm:justify-between">
-            <div className="space-y-0.5">
+          <div className="liquid-glass mx-auto mt-3 max-w-7xl space-y-3 rounded-3xl border-[#5e5ce6]/40 p-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex items-center gap-2 text-xs font-semibold text-[#c2c1ff]">
-                <Zap className="h-3.5 w-3.5" />
-                Force Download Mode Active
+                <Zap className="h-4 w-4" />
+                Force Download Section
               </div>
               <p className="text-[11px] text-[var(--mv-text-muted)]">
-                Scans webpage HTML for embedded <code>&lt;video&gt;</code>, <code>og:video</code>, or <code>.m3u8</code>/<code>.mp4</code> streams—or accepts direct stream URLs. Note: Cloudflare CAPTCHA-gated sites require a direct stream URL or session cookies.
+                Paste any webpage URL (to scan HTML for embedded <code>&lt;video&gt;</code> / <code>.m3u8</code> / <code>.mp4</code>) or paste a direct stream URL.
               </p>
             </div>
-            <input
-              type="url"
-              value={forceReferer}
-              onChange={(e) => setForceReferer(e.target.value)}
-              placeholder="Optional Referer URL (if stream requires page referer)..."
-              className="rounded-full border border-[var(--mv-border)] bg-black/25 px-3.5 py-1.5 text-xs text-[var(--mv-text)] outline-none placeholder:text-[var(--mv-text-subtle)] focus:border-[#5e5ce6] sm:w-80"
-            />
+
+            <div className="grid gap-2.5 lg:grid-cols-[1.5fr_1fr_auto]">
+              <input
+                type="url"
+                value={forceUrl}
+                onChange={(e) => setForceUrl(e.target.value)}
+                placeholder="Paste webpage URL or direct .m3u8 / .mp4 stream URL..."
+                className="rounded-2xl border border-[var(--mv-border)] bg-black/25 px-3.5 py-2 text-xs text-[var(--mv-text)] outline-none placeholder:text-[var(--mv-text-subtle)] focus:border-[#5e5ce6]"
+              />
+              <input
+                type="url"
+                value={forceReferer}
+                onChange={(e) => setForceReferer(e.target.value)}
+                placeholder="Optional Referer page URL (only if stream requires it)..."
+                className="rounded-2xl border border-[var(--mv-border)] bg-black/25 px-3.5 py-2 text-xs text-[var(--mv-text)] outline-none placeholder:text-[var(--mv-text-subtle)] focus:border-[#5e5ce6]"
+              />
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={inspecting || !(forceUrl.trim() || urlInput.trim())}
+                  onClick={() => handleInspect(forceUrl || urlInput, true)}
+                  className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full border border-[#5e5ce6]/50 bg-[#5e5ce6]/30 px-4 py-2 text-xs font-semibold text-white transition hover:bg-[#5e5ce6]/50 disabled:opacity-50 lg:flex-none"
+                >
+                  {inspecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+                  {inspecting ? "Scanning..." : "Go & Pick Quality"}
+                </button>
+                <button
+                  type="button"
+                  disabled={directDownloading || !(forceUrl.trim() || urlInput.trim())}
+                  onClick={handleDirectForceDownload}
+                  className="inline-flex flex-1 items-center justify-center gap-1.5 rounded-full bg-[#0a84ff] px-4 py-2 text-xs font-semibold text-white shadow-md shadow-[#0a84ff]/25 transition hover:bg-[#3e90ff] disabled:opacity-50 lg:flex-none"
+                >
+                  {directDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+                  {directDownloading ? "Queueing..." : "Go Download"}
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -383,6 +437,7 @@ export default function HomePage() {
                   type="button"
                   onClick={() => {
                     setForceMode(true);
+                    setForceUrl(urlInput);
                     handleInspect(urlInput, true);
                   }}
                   className="inline-flex items-center gap-1 rounded-full border border-[#5e5ce6]/50 bg-[#5e5ce6]/30 px-3 py-1 font-semibold text-white hover:bg-[#5e5ce6]/50"

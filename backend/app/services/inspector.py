@@ -375,13 +375,14 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
 
     # Search for standard embedded media URLs (m3u8, mp4, webm, og:video)
     candidates: list[str] = []
+    normalized_body = body.replace("\\/", "/")
     for pat in (
         r'<meta[^>]+property=["\']og:video(?::secure_url)?["\'][^>]+content=["\']([^"\']+)["\']',
         r'<(?:video|source)[^>]+src=["\']([^"\']+)["\']',
         r'(https?://[^\s"\'<>\\]+?\.(?:m3u8|mp4|webm)(?:\?[^\s"\'<>\\]*)?)',
     ):
-        for match in re.findall(pat, body, re.IGNORECASE):
-            resolved = urljoin(url, html.unescape(match.replace("\\/", "/")))
+        for match in re.findall(pat, normalized_body, re.IGNORECASE):
+            resolved = urljoin(url, html.unescape(match))
             if resolved not in candidates:
                 candidates.append(resolved)
 
