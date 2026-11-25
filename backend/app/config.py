@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import Optional
@@ -10,20 +11,22 @@ ROOT_DIR = BACKEND_DIR.parent
 
 
 def find_ffmpeg_executable() -> Optional[str]:
-    direct = shutil.which("ffmpeg")
-    if direct:
-        return direct
-    candidates = [
-        Path.home() / "AppData/Local/Microsoft/WinGet/Links/ffmpeg.exe",
-        Path("C:/ffmpeg/bin/ffmpeg.exe"),
-    ]
-    for candidate in candidates:
-        if candidate.exists():
-            return str(candidate)
     winget_pkgs = Path.home() / "AppData/Local/Microsoft/WinGet/Packages"
     if winget_pkgs.exists():
         for found in winget_pkgs.glob("Gyan.FFmpeg*/**/bin/ffmpeg.exe"):
             return str(found)
+    direct = shutil.which("ffmpeg")
+    if direct:
+        resolved = Path(direct).resolve()
+        if resolved.exists():
+            return str(resolved)
+    candidates = [
+        Path("C:/ffmpeg/bin/ffmpeg.exe"),
+        Path.home() / "AppData/Local/Microsoft/WinGet/Links/ffmpeg.exe",
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return str(candidate.resolve())
     return None
 
 
@@ -121,3 +124,9 @@ settings = Settings()
 settings.storage_path.mkdir(parents=True, exist_ok=True)
 settings.media_path.mkdir(parents=True, exist_ok=True)
 settings.thumbnails_path.mkdir(parents=True, exist_ok=True)
+
+_ffmpeg_bin = find_ffmpeg_executable()
+if _ffmpeg_bin:
+    _ffmpeg_dir = str(Path(_ffmpeg_bin).parent)
+    if _ffmpeg_dir not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = f"{_ffmpeg_dir}{os.pathsep}{os.environ.get('PATH', '')}"

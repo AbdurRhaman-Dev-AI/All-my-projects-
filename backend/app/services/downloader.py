@@ -226,8 +226,14 @@ class DownloadManager:
 
                 loop.call_soon_threadsafe(_processing)
 
+        # Build a Windows-MAX_PATH-safe filename stem (<= 55 chars) from caption or fallback
+        raw_stem = re.sub(r"[^a-zA-Z0-9._-]+", "_", (job.caption or "media").strip()).strip("._-")
+        if not raw_stem or raw_stem.lower().startswith("downloading"):
+            raw_stem = "media"
+        safe_stem = f"{raw_stem[:44]}_{job.job_id[:8]}"
+
         ydl_opts: dict[str, Any] = {
-            "outtmpl": str(target_dir / "%(title).80s-%(id)s.%(ext)s"),
+            "outtmpl": str(target_dir / f"{safe_stem}.%(ext)s"),
             "restrictfilenames": True,
             "noplaylist": False,
             "quiet": True,

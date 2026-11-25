@@ -166,7 +166,7 @@ export function QueueDrawer({ open, jobs, onClose, onClearCompleted }: QueueDraw
                   )}
 
                   {job.error && (
-                    <p className="rounded-xl border border-red-500/25 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-[#ffb4ab]">
+                    <p className="break-words break-all rounded-xl border border-red-500/25 bg-red-500/10 px-2.5 py-1.5 text-[11px] text-[#ffb4ab]">
                       {job.error}
                     </p>
                   )}
