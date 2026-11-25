@@ -227,6 +227,19 @@ export default function HomePage() {
         });
         setInspected(res);
       } catch (err) {
+        if (!useForce) {
+          try {
+            const resForce = await inspectUrl(target, {
+              forceMode: true,
+              referer: referer?.trim() || target,
+            });
+            setInspected(resForce);
+            return;
+          } catch (forceErr) {
+            setInspectError(forceErr instanceof Error ? forceErr.message : "Failed to inspect URL.");
+            return;
+          }
+        }
         setInspectError(err instanceof Error ? err.message : "Failed to inspect URL.");
       } finally {
         setInspecting(false);

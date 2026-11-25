@@ -490,6 +490,32 @@ async def resolve_watch_stream(url: str) -> StreamResolveResponse:
             title=f"Internet Archive • {ident}",
         )
 
+    # Hanime.red episode page -> extract real player iframe (e.g. nhplayer.com)
+    if "hanime.red" in url.lower():
+        try:
+            async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers=_HEADERS) as client:
+                r = await client.get(url)
+            if r.status_code == 200:
+                iframes = re.findall(r'<iframe[^>]+src="(https?://[^"]+)"', r.text, re.I)
+                real_iframe = next(
+                    (
+                        u
+                        for u in iframes
+                        if not any(ad in u.lower() for ad in ("adtng", "realsrv", "exoclick", "doubleclick", "juicyads", "trafficjunky"))
+                    ),
+                    None,
+                )
+                title_m = re.search(r"<title>(.*?)</title>", r.text, re.I | re.S)
+                if real_iframe:
+                    return StreamResolveResponse(
+                        url=url,
+                        stream_url=None,
+                        embed_url=real_iframe,
+                        title=_clean_text(title_m.group(1)) if title_m else "Hanime.red Player",
+                    )
+        except Exception:
+            pass
+
     res = await asyncio.to_thread(_resolve_ytdlp_stream_sync, url)
     if res.stream_url or res.embed_url:
         return res

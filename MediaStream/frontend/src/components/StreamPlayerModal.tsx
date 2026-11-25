@@ -128,7 +128,7 @@ export function StreamPlayerModal({ item, onClose, onDownload }: StreamPlayerMod
         </div>
 
         {/* Video stage */}
-        <div className="relative aspect-video w-full bg-black">
+        <div className="relative aspect-video max-h-[70vh] w-full bg-black">
           {loading ? (
             <div className="flex h-full flex-col items-center justify-center gap-3 text-[var(--mv-text-muted)]">
               <Loader2 className="h-8 w-8 animate-spin text-[var(--mv-primary)]" />

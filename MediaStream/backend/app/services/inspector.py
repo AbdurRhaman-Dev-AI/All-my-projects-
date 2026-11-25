@@ -754,6 +754,7 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
     if thumb:
         thumb = urljoin(url, thumb)
 
+    _AD_KEYWORDS = ("adtng.com", "realsrv.com", "exoclick", "doubleclick", "juicyads", "trafficjunky", "popads", "/creatives/")
     candidates: list[str] = []
     normalized_body = body.replace("\\/", "/")
     for pat in (
@@ -763,12 +764,14 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
     ):
         for match in re.findall(pat, normalized_body, re.IGNORECASE):
             resolved = urljoin(url, html.unescape(match))
+            if any(ad in resolved.lower() for ad in _AD_KEYWORDS):
+                continue
             if resolved not in candidates:
                 candidates.append(resolved)
 
     if not candidates:
         pw_candidates, pw_title, pw_thumb = await _playwright_scan_media(url, referer=referer)
-        candidates.extend(pw_candidates)
+        candidates.extend([c for c in pw_candidates if not any(ad in c.lower() for ad in _AD_KEYWORDS)])
         if pw_title and (not caption or caption == "Embedded Media"):
             caption = pw_title
         if pw_thumb and not thumb:
