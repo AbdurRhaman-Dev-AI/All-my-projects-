@@ -1,4 +1,11 @@
-import type { DownloadRequest, InspectResponse, MediaItem, QueueJob } from "./types";
+import type {
+  BatchDownloadRequest,
+  DownloadRequest,
+  InspectResponse,
+  LibraryStats,
+  MediaItem,
+  QueueJob,
+} from "./types";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
@@ -96,12 +103,23 @@ export async function startDownload(payload: DownloadRequest): Promise<QueueJob>
   });
 }
 
+export async function startBatchDownload(payload: BatchDownloadRequest): Promise<QueueJob[]> {
+  return apiFetch<QueueJob[]>("/api/download/batch", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export async function fetchQueue(): Promise<QueueJob[]> {
   return apiFetch<QueueJob[]>("/api/queue", { cache: "no-store" });
 }
 
 export async function clearCompletedQueue(): Promise<{ removed: number }> {
   return apiFetch<{ removed: number }>("/api/queue/completed", { method: "DELETE" });
+}
+
+export async function fetchMediaStats(): Promise<LibraryStats> {
+  return apiFetch<LibraryStats>("/api/media/stats", { cache: "no-store" });
 }
 
 export async function fetchMedia(params?: {

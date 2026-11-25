@@ -20,11 +20,14 @@ from app.config import find_ffmpeg_executable, settings
 from app.database import get_db, init_db
 from app.models import MediaItem
 from app.schemas import (
+    BatchDownloadRequest,
     DownloadRequest,
     InspectRequest,
     InspectResponse,
+    LibraryStats,
     MediaItemOut,
     MediaUpdateRequest,
+    PlatformFilterInfo,
     QueueJob,
 )
 from app.services.downloader import download_manager
@@ -126,13 +129,21 @@ async def pick_download_folder() -> dict[str, Optional[str]]:
 
 
 @app.post("/api/inspect", response_model=InspectResponse)
-async def inspect_media_url(payload: InspectRequest) -> InspectResponse:
+async def inspect_media_url(
+    payload: InspectRequest,
+    db: AsyncSession = Depends(get_db),
+) -> InspectResponse:
+    url_str = str(payload.url)
     try:
-        return await inspect_url(
-            str(payload.url),
+        result = await inspect_url(
+            url_str,
             force_mode=payload.force_mode,
             referer=payload.referer,
         )
+        existing_stmt = select(MediaItem.id).where(MediaItem.original_url == url_str).limit(1)
+        existing_id = (await db.execute(existing_stmt)).scalar_one_or_none()
+        result.existing_media_id = existing_id
+        return result
     except Exception as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -140,6 +151,11 @@ async def inspect_media_url(payload: InspectRequest) -> InspectResponse:
 @app.post("/api/download", response_model=QueueJob)
 async def enqueue_download(payload: DownloadRequest) -> QueueJob:
     return download_manager.enqueue(payload)
+
+
+@app.post("/api/download/batch", response_model=list[QueueJob])
+async def enqueue_batch_download(payload: BatchDownloadRequest) -> list[QueueJob]:
+    return download_manager.enqueue_batch(payload)
 
 
 @app.get("/api/queue", response_model=list[QueueJob])
@@ -151,6 +167,25 @@ async def get_queue() -> list[QueueJob]:
 async def clear_completed_queue() -> dict[str, int]:
     removed = download_manager.clear_completed()
     return {"removed": removed}
+
+
+@app.get("/api/media/stats", response_model=LibraryStats)
+async def get_media_stats(db: AsyncSession = Depends(get_db)) -> LibraryStats:
+    items = list((await db.execute(select(MediaItem))).scalars().all())
+    total_size = sum(i.file_size or 0 for i in items)
+    counts: dict[str, PlatformFilterInfo] = {}
+    for item in items:
+        key = item.platform
+        if key not in counts:
+            counts[key] = PlatformFilterInfo(
+                platform=item.platform,
+                source_domain=item.source_domain or "web",
+                site_name=item.site_name or item.platform.capitalize(),
+                count=0,
+            )
+        counts[key].count += 1
+    ordered = sorted(counts.values(), key=lambda x: x.count, reverse=True)
+    return LibraryStats(total_items=len(items), total_size_bytes=total_size, platforms=ordered)
 
 
 @app.get("/api/media", response_model=list[MediaItemOut])
@@ -177,6 +212,8 @@ async def list_media(
             if needle in (item.caption or "").lower()
             or needle in (item.creator or "").lower()
             or needle in (item.notes or "").lower()
+            or needle in (item.site_name or "").lower()
+            or needle in (item.source_domain or "").lower()
             or any(needle in t.lower() for t in (item.tags or []))
         ]
 

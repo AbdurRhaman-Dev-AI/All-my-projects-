@@ -3,7 +3,6 @@ from typing import Literal, Optional
 from pydantic import BaseModel, Field, HttpUrl
 
 
-PlatformType = Literal["twitter", "instagram", "facebook", "missav", "other"]
 MediaType = Literal["video", "image", "carousel", "audio"]
 FormatPreset = Literal[
     "best_mp4",
@@ -12,7 +11,13 @@ FormatPreset = Literal[
     "mp4_1080p",
     "mp4_720p",
     "mp4_480p",
+    "mp4_360p",
+    "mp4_240p",
+    "mp4_144p",
     "audio_mp3",
+    "audio_mp3_320",
+    "audio_mp3_256",
+    "audio_mp3_128",
     "original_images",
 ]
 QueueStatus = Literal["queued", "downloading", "processing", "completed", "failed"]
@@ -26,9 +31,11 @@ class InspectRequest(BaseModel):
 
 class FormatOption(BaseModel):
     id: FormatPreset
+    kind: Literal["video", "audio", "image"] = "video"
     label: str
     description: str
     resolution_tag: Optional[str] = None
+    badge_tag: Optional[str] = None
     estimated_size_bytes: Optional[int] = None
     estimated_size_label: Optional[str] = None
     available: bool = True
@@ -38,7 +45,9 @@ class InspectResponse(BaseModel):
     url: str
     resolved_stream_url: Optional[str] = None
     referer: Optional[str] = None
-    platform: PlatformType
+    platform: str
+    source_domain: str
+    site_name: str
     creator: str
     caption: str
     thumbnail_url: Optional[str] = None
@@ -46,6 +55,8 @@ class InspectResponse(BaseModel):
     duration: Optional[int] = None
     resolution: Optional[str] = None
     item_count: int = 1
+    subtitles_available: bool = False
+    existing_media_id: Optional[str] = None
     formats: list[FormatOption]
 
 
@@ -57,17 +68,31 @@ class DownloadRequest(BaseModel):
     creator: Optional[str] = None
     caption: Optional[str] = None
     thumbnail_url: Optional[str] = None
-    platform: Optional[PlatformType] = None
+    platform: Optional[str] = None
+    source_domain: Optional[str] = None
+    site_name: Optional[str] = None
     media_type: Optional[MediaType] = None
     export_dir: Optional[str] = None
     save_to_export_dir: bool = True
+    download_subtitles: bool = False
     referer: Optional[str] = None
+
+
+class BatchDownloadRequest(BaseModel):
+    urls: list[HttpUrl]
+    format_id: FormatPreset = "best_mp4"
+    tags: list[str] = Field(default_factory=list)
+    download_subtitles: bool = False
+    export_dir: Optional[str] = None
+    save_to_export_dir: bool = True
 
 
 class QueueJob(BaseModel):
     job_id: str
     url: str
-    platform: PlatformType
+    platform: str
+    source_domain: str = ""
+    site_name: str = ""
     creator: str
     caption: str
     thumbnail_url: Optional[str] = None
@@ -85,6 +110,8 @@ class QueueJob(BaseModel):
 class MediaItemOut(BaseModel):
     id: str
     platform: str
+    source_domain: str = ""
+    site_name: str = ""
     original_url: str
     creator: str
     caption: str
@@ -99,6 +126,19 @@ class MediaItemOut(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class PlatformFilterInfo(BaseModel):
+    platform: str
+    source_domain: str
+    site_name: str
+    count: int
+
+
+class LibraryStats(BaseModel):
+    total_items: int
+    total_size_bytes: int
+    platforms: list[PlatformFilterInfo]
 
 
 class MediaUpdateRequest(BaseModel):

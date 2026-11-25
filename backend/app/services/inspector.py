@@ -9,20 +9,42 @@ from urllib.parse import urljoin, urlparse
 import httpx
 
 from app.config import settings
-from app.schemas import FormatOption, FormatPreset, InspectResponse, MediaType, PlatformType
+from app.schemas import FormatOption, FormatPreset, InspectResponse, MediaType
 
 
-def detect_platform(url: str) -> PlatformType:
-    host = (urlparse(url).hostname or "").lower()
+def detect_site_info(url: str) -> tuple[str, str, str]:
+    """Returns (platform_key, source_domain, site_name) for any URL."""
+    parsed = urlparse(url)
+    host = (parsed.hostname or "").lower().removeprefix("www.")
+    path = (parsed.path or "").lower()
+
+    if host in ("youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"):
+        if "/shorts/" in path:
+            return "youtube_shorts", "youtube.com", "YouTube Shorts"
+        return "youtube", "youtube.com", "YouTube"
+    if "tiktok.com" in host:
+        return "tiktok", "tiktok.com", "TikTok"
     if any(d in host for d in ("twitter.com", "x.com", "t.co", "fxtwitter.com", "vxtwitter.com")):
-        return "twitter"
+        return "twitter", "x.com", "X / Twitter"
     if "instagram.com" in host or "instagr.am" in host:
-        return "instagram"
+        return "instagram", "instagram.com", "Instagram"
     if any(d in host for d in ("facebook.com", "fb.watch", "fb.com", "m.facebook.com")):
-        return "facebook"
+        return "facebook", "facebook.com", "Facebook"
+    if "reddit.com" in host or host == "redd.it":
+        return "reddit", "reddit.com", "Reddit"
+    if "vimeo.com" in host:
+        return "vimeo", "vimeo.com", "Vimeo"
     if "missav" in host:
-        return "missav"
-    return "other"
+        return "missav", host, "MissAV"
+
+    if host:
+        clean_name = host.split(".")[0].capitalize()
+        return host, host, clean_name
+    return "other", "web", "Web"
+
+
+def detect_platform(url: str) -> str:
+    return detect_site_info(url)[0]
 
 
 def format_bytes(num_bytes: Optional[int]) -> Optional[str]:
@@ -36,6 +58,8 @@ def format_bytes(num_bytes: Optional[int]) -> Optional[str]:
         idx += 1
     if idx == 0:
         return f"{int(val)} B"
+    if val >= 100 and idx == 2:
+        return f"~{val:.0f} MB"
     return f"~{val:.1f} {units[idx]}"
 
 
@@ -144,14 +168,49 @@ def _estimate_stream_bytes(fmt: dict[str, Any], duration: Optional[float]) -> Op
     return None
 
 
-def _build_formats_from_info(media_type: MediaType, info: Optional[dict[str, Any]] = None) -> list[FormatOption]:
+async def _probe_head_size(url: str) -> Optional[int]:
+    if not url or ".m3u8" in url.lower():
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=3.5, follow_redirects=True) as client:
+            resp = await client.head(url, headers={"User-Agent": "Mozilla/5.0"})
+            cl = resp.headers.get("content-length")
+            if cl and cl.isdigit():
+                val = int(cl)
+                return val if val > 10_000 else None
+    except Exception:
+        pass
+    return None
+
+
+async def _populate_missing_format_sizes(raw_formats: list[dict[str, Any]], duration: Optional[float]) -> None:
+    """When yt-dlp omits filesize/tbr on direct MP4 streams, probe Content-Length in parallel."""
+    candidates: list[dict[str, Any]] = []
+    for f in raw_formats:
+        if not isinstance(f, dict):
+            continue
+        if _estimate_stream_bytes(f, duration) is None and isinstance(f.get("url"), str):
+            if f.get("ext") in ("mp4", "webm", "m4a") or "mp4" in (f.get("protocol") or ""):
+                candidates.append(f)
+    if not candidates:
+        return
+    to_probe = candidates[:8]
+    sizes = await asyncio.gather(*(_probe_head_size(f["url"]) for f in to_probe))
+    for fmt, sz in zip(to_probe, sizes):
+        if sz:
+            fmt["filesize_approx"] = sz
+
+
+async def _build_formats_from_info(media_type: MediaType, info: Optional[dict[str, Any]] = None) -> list[FormatOption]:
     if media_type in ("image", "carousel"):
         return [
             FormatOption(
                 id="original_images",
+                kind="image",
                 label="Original Images / Carousel",
                 description="Full-resolution photos saved as a grouped item",
                 resolution_tag="ORIG",
+                badge_tag="IMG",
                 available=True,
             ),
         ]
@@ -160,7 +219,9 @@ def _build_formats_from_info(media_type: MediaType, info: Optional[dict[str, Any
     duration_val = (info or {}).get("duration")
     duration = float(duration_val) if isinstance(duration_val, (int, float)) and duration_val > 0 else None
 
-    # Best audio size for accurate muxed estimate
+    if isinstance(raw_formats, list) and raw_formats:
+        await _populate_missing_format_sizes(raw_formats, duration)
+
     audio_sizes: list[int] = []
     for f in raw_formats:
         if not isinstance(f, dict):
@@ -171,13 +232,15 @@ def _build_formats_from_info(media_type: MediaType, info: Optional[dict[str, Any
                 audio_sizes.append(sz)
     best_audio_bytes = max(audio_sizes) if audio_sizes else None
 
-    # Inspect video streams per resolution tier
-    tiers: list[tuple[FormatPreset, str, str, str, int, int]] = [
-        ("mp4_2160p", "4K UHD (2160p)", "Ultra HD video + audio merged to MP4", "4K", 2160, 99999),
-        ("mp4_1440p", "2K QHD (1440p)", "2K video + audio merged to MP4", "2K", 1440, 2159),
-        ("mp4_1080p", "Full HD (1080p)", "1080p video + audio merged to MP4", "1080p", 1080, 1439),
-        ("mp4_720p", "HD (720p)", "Balanced 720p MP4 for faster downloads", "720p", 720, 1079),
-        ("mp4_480p", "SD (480p)", "Compact 480p MP4 for smaller file size", "480p", 480, 719),
+    tiers: list[tuple[FormatPreset, str, str, str, Optional[str], int, int]] = [
+        ("mp4_2160p", "2160p", "Ultra HD 4K MP4", "2160p", "4K", 2160, 99999),
+        ("mp4_1440p", "1440p", "2K QHD MP4", "1440p", "2K", 1440, 2159),
+        ("mp4_1080p", "1080p", "Full HD MP4", "1080p", "FHD", 1080, 1439),
+        ("mp4_720p", "720p", "HD MP4", "720p", "HD", 720, 1079),
+        ("mp4_480p", "480p", "Standard 480p MP4", "480p", None, 480, 719),
+        ("mp4_360p", "360p", "Compact 360p MP4", "360p", None, 360, 479),
+        ("mp4_240p", "240p", "Low-data 240p MP4", "240p", None, 240, 359),
+        ("mp4_144p", "144p", "Minimum 144p MP4", "144p", None, 1, 239),
     ]
 
     options: list[FormatOption] = []
@@ -188,7 +251,7 @@ def _build_formats_from_info(media_type: MediaType, info: Optional[dict[str, Any
         if isinstance(f, dict) and isinstance(f.get("height"), (int, float)):
             max_height_seen = max(max_height_seen, int(f["height"]))
 
-    for preset_id, label, desc, tag, min_h, max_h in tiers:
+    for preset_id, label, desc, res_tag, badge_tag, min_h, max_h in tiers:
         matching = [
             f
             for f in raw_formats
@@ -200,7 +263,6 @@ def _build_formats_from_info(media_type: MediaType, info: Optional[dict[str, Any
         if not matching:
             continue
 
-        # Prefer mp4/avc1 or highest estimated size for realistic ceiling
         sizes: list[int] = []
         for m in matching:
             v_sz = _estimate_stream_bytes(m, duration)
@@ -216,16 +278,17 @@ def _build_formats_from_info(media_type: MediaType, info: Optional[dict[str, Any
         options.append(
             FormatOption(
                 id=preset_id,
+                kind="video",
                 label=label,
                 description=desc,
-                resolution_tag=tag,
+                resolution_tag=res_tag,
+                badge_tag=badge_tag,
                 estimated_size_bytes=est_bytes,
                 estimated_size_label=format_bytes(est_bytes),
                 available=True,
             )
         )
 
-    # Always include Best MP4 at the top (or if no granular heights were reported)
     if best_total_bytes is None and info:
         top_sz = _estimate_stream_bytes(info, duration)
         if top_sz:
@@ -233,32 +296,67 @@ def _build_formats_from_info(media_type: MediaType, info: Optional[dict[str, Any
 
     best_opt = FormatOption(
         id="best_mp4",
-        label="Best MP4 (Auto)",
-        description=f"Highest quality available{f' ({max_height_seen}p)' if max_height_seen else ''} merged to MP4",
+        kind="video",
+        label=f"Best MP4{f' ({max_height_seen}p)' if max_height_seen else ''}",
+        description="Highest quality video + audio merged to MP4",
         resolution_tag=f"{max_height_seen}p" if max_height_seen else "BEST",
+        badge_tag="BEST",
         estimated_size_bytes=best_total_bytes,
         estimated_size_label=format_bytes(best_total_bytes),
         available=True,
     )
 
-    # If no specific tiers matched (e.g. generic/HLS without separate heights), keep standard 1080p/720p options too
     if not options:
         options = [
-            FormatOption(id="mp4_1080p", label="Full HD (1080p)", description="Up to 1080p MP4", resolution_tag="1080p", available=True),
-            FormatOption(id="mp4_720p", label="HD (720p)", description="Up to 720p MP4", resolution_tag="720p", available=True),
+            best_opt,
+            FormatOption(id="mp4_1080p", kind="video", label="1080p", description="Full HD MP4", resolution_tag="1080p", badge_tag="FHD", available=True),
+            FormatOption(id="mp4_720p", kind="video", label="720p", description="HD MP4", resolution_tag="720p", badge_tag="HD", available=True),
+            FormatOption(id="mp4_480p", kind="video", label="480p", description="Standard 480p MP4", resolution_tag="480p", available=True),
         ]
+    else:
+        options = [best_opt, *options]
 
-    audio_opt = FormatOption(
-        id="audio_mp3",
-        label="Audio MP3 (192kbps)",
-        description="Extract audio track as MP3",
-        resolution_tag="MP3",
-        estimated_size_bytes=best_audio_bytes or (int(192_000 / 8 * duration) if duration else None),
-        estimated_size_label=format_bytes(best_audio_bytes or (int(192_000 / 8 * duration) if duration else None)),
-        available=True,
-    )
+    audio_320 = int(320_000 / 8 * duration) if duration else best_audio_bytes
+    audio_256 = int(256_000 / 8 * duration) if duration else (int(best_audio_bytes * 0.8) if best_audio_bytes else None)
+    audio_128 = int(128_000 / 8 * duration) if duration else (int(best_audio_bytes * 0.45) if best_audio_bytes else None)
 
-    return [best_opt, *options, audio_opt]
+    audio_options = [
+        FormatOption(
+            id="audio_mp3_320",
+            kind="audio",
+            label="320 kbps",
+            description="High-bitrate MP3 audio",
+            resolution_tag="320k",
+            badge_tag="MP3",
+            estimated_size_bytes=audio_320,
+            estimated_size_label=format_bytes(audio_320),
+            available=True,
+        ),
+        FormatOption(
+            id="audio_mp3_256",
+            kind="audio",
+            label="256 kbps",
+            description="Standard high-quality MP3 audio",
+            resolution_tag="256k",
+            badge_tag="MP3",
+            estimated_size_bytes=audio_256,
+            estimated_size_label=format_bytes(audio_256),
+            available=True,
+        ),
+        FormatOption(
+            id="audio_mp3_128",
+            kind="audio",
+            label="128 kbps",
+            description="Compact MP3 audio",
+            resolution_tag="128k",
+            badge_tag="MP3",
+            estimated_size_bytes=audio_128,
+            estimated_size_label=format_bytes(audio_128),
+            available=True,
+        ),
+    ]
+
+    return [*options, *audio_options]
 
 
 async def _inspect_with_ytdlp(url: str, referer: Optional[str] = None) -> Optional[dict[str, Any]]:
@@ -312,10 +410,6 @@ async def _inspect_with_gallery_dl(url: str) -> Optional[list[Any]]:
 
 
 async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> InspectResponse:
-    """
-    Scans a regular HTML webpage for embedded direct video/HLS streams (<video>, og:video, .m3u8, .mp4)
-    when standard extractors don't match. Respects anti-bot challenges by reporting them cleanly.
-    """
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
@@ -342,8 +436,8 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
     if resp.status_code >= 400:
         raise RuntimeError(f"Page returned HTTP {resp.status_code} while scanning for media.")
 
+    platform, source_domain, site_name = detect_site_info(url)
     content_type = resp.headers.get("content-type", "").lower()
-    # Direct media file or playlist URL
     if any(ext in content_type for ext in ("video/", "audio/", "mpegurl", "x-mpegurl")) or re.search(
         r"\.(m3u8|mp4|webm|mov|mp3)(\?|$)", url, re.IGNORECASE
     ):
@@ -353,7 +447,9 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
                 url=url,
                 resolved_stream_url=url,
                 referer=referer,
-                platform=detect_platform(url),
+                platform=platform,
+                source_domain=source_domain,
+                site_name=site_name,
                 creator=_extract_creator(yt_stream),
                 caption=_extract_caption(yt_stream),
                 thumbnail_url=yt_stream.get("thumbnail"),
@@ -361,18 +457,21 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
                 duration=int(yt_stream["duration"]) if yt_stream.get("duration") else None,
                 resolution=_extract_resolution(yt_stream),
                 item_count=1,
-                formats=_build_formats_from_info("video", yt_stream),
+                subtitles_available=bool(yt_stream.get("subtitles") or yt_stream.get("automatic_captions")),
+                formats=await _build_formats_from_info("video", yt_stream),
             )
         return InspectResponse(
             url=url,
             resolved_stream_url=url,
             referer=referer,
-            platform=detect_platform(url),
-            creator=f"@{urlparse(url).hostname or 'stream'}",
+            platform=platform,
+            source_domain=source_domain,
+            site_name=site_name,
+            creator=f"@{source_domain}",
             caption="Direct Media Stream",
             media_type="video",
             item_count=1,
-            formats=_build_formats_from_info("video", None),
+            formats=await _build_formats_from_info("video", None),
         )
 
     body = resp.text
@@ -391,7 +490,6 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
     if thumb:
         thumb = urljoin(url, thumb)
 
-    # Search for standard embedded media URLs (m3u8, mp4, webm, og:video)
     candidates: list[str] = []
     normalized_body = body.replace("\\/", "/")
     for pat in (
@@ -417,35 +515,38 @@ async def _force_scan_page_media(url: str, referer: Optional[str] = None) -> Ins
             url=stream_url,
             resolved_stream_url=stream_url,
             referer=referer or url,
-            platform=detect_platform(url),
-            creator=f"@{urlparse(url).hostname or 'web'}",
+            platform=platform,
+            source_domain=source_domain,
+            site_name=site_name,
+            creator=f"@{source_domain}",
             caption=caption,
             thumbnail_url=thumb or yt_stream.get("thumbnail"),
             media_type="video",
             duration=int(yt_stream["duration"]) if yt_stream.get("duration") else None,
             resolution=_extract_resolution(yt_stream),
             item_count=1,
-            formats=_build_formats_from_info("video", yt_stream),
+            subtitles_available=bool(yt_stream.get("subtitles") or yt_stream.get("automatic_captions")),
+            formats=await _build_formats_from_info("video", yt_stream),
         )
 
     return InspectResponse(
         url=stream_url,
         resolved_stream_url=stream_url,
         referer=referer or url,
-        platform=detect_platform(url),
-        creator=f"@{urlparse(url).hostname or 'web'}",
+        platform=platform,
+        source_domain=source_domain,
+        site_name=site_name,
+        creator=f"@{source_domain}",
         caption=caption,
         thumbnail_url=thumb,
         media_type="video",
         item_count=1,
-        formats=_build_formats_from_info("video", None),
+        formats=await _build_formats_from_info("video", None),
     )
 
 
 async def inspect_url(url: str, force_mode: bool = False, referer: Optional[str] = None) -> InspectResponse:
-    platform = detect_platform(url)
-
-    # First check direct yt-dlp extraction
+    platform, source_domain, site_name = detect_site_info(url)
     yt_data = await _inspect_with_ytdlp(url, referer=referer)
 
     if yt_data and "_error" not in yt_data:
@@ -462,6 +563,8 @@ async def inspect_url(url: str, force_mode: bool = False, referer: Optional[str]
                 url=url,
                 referer=referer,
                 platform=platform,
+                source_domain=source_domain,
+                site_name=site_name,
                 creator=_extract_creator(first) if _extract_creator(first) != "@unknown" else _extract_creator(yt_data),
                 caption=_extract_caption(yt_data),
                 thumbnail_url=first.get("thumbnail") or yt_data.get("thumbnail"),
@@ -469,7 +572,8 @@ async def inspect_url(url: str, force_mode: bool = False, referer: Optional[str]
                 duration=int(first["duration"]) if first.get("duration") else None,
                 resolution=_extract_resolution(first),
                 item_count=len(entries),
-                formats=_build_formats_from_info(media_type, first),
+                subtitles_available=bool(first.get("subtitles") or first.get("automatic_captions") or yt_data.get("subtitles")),
+                formats=await _build_formats_from_info(media_type, first),
             )
 
         ext = (yt_data.get("ext") or "").lower()
@@ -481,6 +585,8 @@ async def inspect_url(url: str, force_mode: bool = False, referer: Optional[str]
             url=url,
             referer=referer,
             platform=platform,
+            source_domain=source_domain,
+            site_name=site_name,
             creator=_extract_creator(yt_data),
             caption=_extract_caption(yt_data),
             thumbnail_url=yt_data.get("thumbnail"),
@@ -488,12 +594,12 @@ async def inspect_url(url: str, force_mode: bool = False, referer: Optional[str]
             duration=int(yt_data["duration"]) if yt_data.get("duration") else None,
             resolution=_extract_resolution(yt_data),
             item_count=1,
-            formats=_build_formats_from_info(media_type, yt_data),
+            subtitles_available=bool(yt_data.get("subtitles") or yt_data.get("automatic_captions")),
+            formats=await _build_formats_from_info(media_type, yt_data),
         )
 
     yt_err = (yt_data or {}).get("_error", "")
 
-    # In force_mode, scan the page HTML / direct stream if yt-dlp didn't match natively
     if force_mode:
         return await _force_scan_page_media(url, referer=referer)
 
@@ -531,6 +637,8 @@ async def inspect_url(url: str, force_mode: bool = False, referer: Optional[str]
         url=url,
         referer=referer,
         platform=platform,
+        source_domain=source_domain,
+        site_name=site_name,
         creator=creator,
         caption=_extract_caption(meta_dict),
         thumbnail_url=image_urls[0] if image_urls else None,
@@ -538,5 +646,5 @@ async def inspect_url(url: str, force_mode: bool = False, referer: Optional[str]
         duration=None,
         resolution=_extract_resolution(meta_dict),
         item_count=item_count,
-        formats=_build_formats_from_info(media_type, meta_dict),
+        formats=await _build_formats_from_info(media_type, meta_dict),
     )

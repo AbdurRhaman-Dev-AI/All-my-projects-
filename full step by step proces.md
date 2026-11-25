@@ -109,3 +109,20 @@ Created a monorepo under `downloder laibary/`:
 2. **Force Download Mode & MissAV Platform Filter (`frontend/src/app/page.tsx`, `PlatformBadge.tsx`)**:
    - Added a dedicated **Force Download** mode (plus optional custom `Referer` URL) that scans webpage HTML for embedded `<video>`, `<source>`, `og:video`, or `.m3u8`/`.mp4` streams and supports direct stream URLs.
    - Added `MissAV` platform detection & filter chip (`missav`), and clean detection of Cloudflare anti-bot challenges (`cf-mitigated`) with guidance to use a direct `.m3u8`/`.mp4` stream URL or exported browser cookies when a page is challenge-gated.
+
+---
+
+## Step 9: Website Logos, Dynamic Site Filters, Full Quality Table, Paste, Batch, Subtitles & Vault Counter
+1. **Unlimited Size Quality Table & File-Size Probing (`backend/app/services/inspector.py`, `InspectModal.tsx`)**:
+   - Expanded quality presets to include **Video (`2160p 4K`, `1440p 2K`, `1080p FHD`, `720p HD`, `480p`, `360p`, `240p`, `144p`, `Best MP4`)** and **Audio (`MP3 320 kbps`, `256 kbps`, `128 kbps`)** with zero file-size cap and instant 1-click **Download** buttons per row.
+   - Added parallel `HEAD` `Content-Length` probing when platforms omit `filesize`/`tbr` in JSON metadata.
+2. **Website Logos & Auto-Updating Platform Filter List (`PlatformLogo.tsx`, `database.py`, `main.py`)**:
+   - Added `source_domain` and `site_name` columns to SQLite (`MediaItem`) with automatic schema migration and backfill on startup.
+   - Rendered crisp SVG brand logos for YouTube, YouTube Shorts, TikTok, Instagram, Facebook, X/Twitter, Reddit, and Vimeo plus automatic favicon loading for any other website.
+   - Added `GET /api/media/stats` so every new website downloaded automatically appears in the filter bar with its logo and count, alongside a total vault size counter (`items · MB/GB`).
+3. **One-Click Paste, Batch Queue, Subtitles & Duplicate Detection**:
+   - Added a **Paste** button next to **Download** in the top bar (`navigator.clipboard.readText()`).
+   - Added `POST /api/download/batch` + `BatchModal.tsx` for multi-URL queueing.
+   - Added `.srt` / `.vtt` subtitle downloading (`download_subtitles`) and duplicate URL detection (`existing_media_id`) inside `InspectModal`.
+4. **GitHub Auto-Commit Policy (`AGENTS.md`, `.gitignore`)**:
+   - Configured repository tracking to `https://github.com/AbdurRhaman-Dev-AI/All-my-projects-.git` (`main`) with automatic commits on every change.

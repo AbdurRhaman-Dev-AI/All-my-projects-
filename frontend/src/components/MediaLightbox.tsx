@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { ChevronLeft, ChevronRight, Download, ExternalLink, FolderOpen, Plus, Save, Trash2, X } from "lucide-react";
+import { Captions, ChevronLeft, ChevronRight, Download, ExternalLink, FolderOpen, Plus, Save, Trash2, X } from "lucide-react";
 import { mediaDownloadUrl, revealMediaInFolder, storageUrl } from "@/lib/api";
 import type { MediaItem } from "@/lib/types";
 import { PlatformBadge } from "./PlatformBadge";
@@ -14,13 +14,15 @@ interface MediaLightboxProps {
 }
 
 export function MediaLightbox({ item, onClose, onUpdate, onDelete }: MediaLightboxProps) {
+  const mediaFiles = item.file_paths.filter((p) => !/\.(srt|vtt)$/i.test(p));
+  const subtitleFiles = item.file_paths.filter((p) => /\.(srt|vtt)$/i.test(p));
   const [slideIndex, setSlideIndex] = useState(0);
   const [tags, setTags] = useState<string[]>(item.tags);
   const [tagInput, setTagInput] = useState("");
   const [notes, setNotes] = useState(item.notes || "");
   const [saving, setSaving] = useState(false);
 
-  const currentRel = item.file_paths[slideIndex] ?? item.file_paths[0] ?? null;
+  const currentRel = mediaFiles[slideIndex] ?? mediaFiles[0] ?? item.file_paths[0] ?? null;
   const mediaSrc = storageUrl(currentRel);
 
   const addTag = () => {
@@ -76,24 +78,24 @@ export function MediaLightbox({ item, onClose, onUpdate, onDelete }: MediaLightb
             />
           )}
 
-          {item.file_paths.length > 1 && (
+          {mediaFiles.length > 1 && (
             <>
               <button
                 type="button"
-                onClick={() => setSlideIndex((i) => (i - 1 + item.file_paths.length) % item.file_paths.length)}
+                onClick={() => setSlideIndex((i) => (i - 1 + mediaFiles.length) % mediaFiles.length)}
                 className="absolute left-4 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white backdrop-blur-md hover:bg-black/80"
               >
                 <ChevronLeft className="h-5 w-5" />
               </button>
               <button
                 type="button"
-                onClick={() => setSlideIndex((i) => (i + 1) % item.file_paths.length)}
+                onClick={() => setSlideIndex((i) => (i + 1) % mediaFiles.length)}
                 className="absolute right-4 top-1/2 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-full border border-white/20 bg-black/60 text-white backdrop-blur-md hover:bg-black/80"
               >
                 <ChevronRight className="h-5 w-5" />
               </button>
               <span className="font-mono-meta absolute bottom-4 left-1/2 -translate-x-1/2 rounded-full border border-white/15 bg-black/65 px-3 py-1 text-xs text-white">
-                {slideIndex + 1} / {item.file_paths.length}
+                {slideIndex + 1} / {mediaFiles.length}
               </span>
             </>
           )}
@@ -104,7 +106,11 @@ export function MediaLightbox({ item, onClose, onUpdate, onDelete }: MediaLightb
           <div className="space-y-4 overflow-y-auto">
             <div className="flex items-center justify-between gap-2">
               <div className="flex items-center gap-2.5">
-                <PlatformBadge platform={item.platform} />
+                <PlatformBadge
+                  platform={item.platform}
+                  sourceDomain={item.source_domain}
+                  siteName={item.site_name}
+                />
                 <span className="text-sm font-semibold text-[var(--mv-primary-soft)]">
                   {item.creator}
                 </span>
@@ -120,15 +126,23 @@ export function MediaLightbox({ item, onClose, onUpdate, onDelete }: MediaLightb
 
             <p className="text-sm leading-relaxed text-[var(--mv-text)]">{item.caption}</p>
 
-            <a
-              href={item.original_url}
-              target="_blank"
-              rel="noreferrer"
-              className="inline-flex items-center gap-1.5 text-xs text-[#0a84ff] hover:underline"
-            >
-              <ExternalLink className="h-3.5 w-3.5" />
-              Open original post
-            </a>
+            <div className="flex flex-wrap items-center gap-3">
+              <a
+                href={item.original_url}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1.5 text-xs text-[#0a84ff] hover:underline"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Open original post
+              </a>
+              {subtitleFiles.length > 0 && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-[#30d158]/30 bg-[#30d158]/15 px-2.5 py-0.5 text-[11px] text-[#47e266]">
+                  <Captions className="h-3 w-3" />
+                  {subtitleFiles.length} subtitle file{subtitleFiles.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </div>
 
             {/* Tags */}
             <div className="space-y-2 pt-2">

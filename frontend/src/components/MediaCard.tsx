@@ -21,6 +21,7 @@ function formatDuration(seconds: number | null): string | null {
 export function MediaCard({ item, onOpen, onDelete }: MediaCardProps) {
   const thumb = storageUrl(item.thumbnail_path);
   const durationLabel = formatDuration(item.duration);
+  const mediaFilesCount = item.file_paths.filter((p) => !/\.(srt|vtt)$/i.test(p)).length;
 
   return (
     <article
@@ -50,12 +51,16 @@ export function MediaCard({ item, onOpen, onDelete }: MediaCardProps) {
 
         {/* Top Badges */}
         <div className="absolute inset-x-3 top-3 flex items-center justify-between gap-2">
-          <PlatformBadge platform={item.platform} />
+          <PlatformBadge
+            platform={item.platform}
+            sourceDomain={item.source_domain}
+            siteName={item.site_name}
+          />
 
           {item.media_type === "carousel" && (
             <span className="font-mono-meta inline-flex items-center gap-1 rounded-full border border-white/15 bg-black/55 px-2 py-0.5 text-[10px] font-semibold text-white backdrop-blur-md">
               <Layers className="h-3 w-3" />
-              {item.file_paths.length}
+              {mediaFilesCount}
             </span>
           )}
         </div>

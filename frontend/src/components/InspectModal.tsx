@@ -1,9 +1,21 @@
 "use client";
 
 import { useState } from "react";
-import { Check, Download, Film, FolderOpen, Image as ImageIcon, Plus, Tag, X } from "lucide-react";
+import {
+  AlertCircle,
+  Captions,
+  Check,
+  Download,
+  Film,
+  FolderOpen,
+  Image as ImageIcon,
+  Music,
+  Plus,
+  Tag,
+  X,
+} from "lucide-react";
 import { pickDownloadFolder } from "@/lib/api";
-import type { FormatPreset, InspectResponse } from "@/lib/types";
+import type { FormatOption, FormatPreset, InspectResponse } from "@/lib/types";
 import { PlatformBadge } from "./PlatformBadge";
 
 interface InspectModalProps {
@@ -12,13 +24,69 @@ interface InspectModalProps {
   defaultAutoExport: boolean;
   onClose: () => void;
   onFolderPicked: (folder: string) => void;
+  onViewExisting?: (mediaId: string) => void;
   onConfirm: (
     formatId: FormatPreset,
     tags: string[],
     notes: string,
     exportDir: string,
-    saveToExportDir: boolean
+    saveToExportDir: boolean,
+    downloadSubtitles: boolean
   ) => Promise<void>;
+}
+
+function QualityRow({
+  fmt,
+  selected,
+  submitting,
+  onSelect,
+  onInstantDownload,
+}: {
+  fmt: FormatOption;
+  selected: boolean;
+  submitting: boolean;
+  onSelect: () => void;
+  onInstantDownload: () => void;
+}) {
+  const pillLabel = fmt.kind === "audio" ? "MP3" : fmt.kind === "image" ? "IMG" : "MP4";
+  return (
+    <div
+      onClick={onSelect}
+      className={`flex cursor-pointer items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 transition ${
+        selected
+          ? "border-[#0a84ff] bg-[#0a84ff]/15 text-[var(--mv-text)]"
+          : "border-[var(--mv-border)] bg-white/5 text-[var(--mv-text-muted)] hover:bg-white/10"
+      }`}
+    >
+      <div className="flex min-w-0 items-center gap-2.5">
+        <span className="font-mono-meta shrink-0 rounded-md border border-[#0a84ff]/40 bg-[#0a84ff]/15 px-2 py-0.5 text-[10px] font-bold text-[#aac7ff]">
+          {pillLabel}
+        </span>
+        <span className="truncate text-xs font-semibold text-[var(--mv-text)]">{fmt.label}</span>
+        {fmt.badge_tag && (
+          <span className="font-mono-meta shrink-0 rounded bg-white/15 px-1.5 py-0.5 text-[9px] font-bold uppercase text-white">
+            {fmt.badge_tag}
+          </span>
+        )}
+        <span className="font-mono-meta shrink-0 text-[11px] text-[var(--mv-text-subtle)]">
+          {fmt.estimated_size_label || "Auto size"}
+        </span>
+      </div>
+
+      <div className="flex shrink-0 items-center gap-2" onClick={(e) => e.stopPropagation()}>
+        {selected && <Check className="h-3.5 w-3.5 text-[#0a84ff]" />}
+        <button
+          type="button"
+          disabled={submitting}
+          onClick={onInstantDownload}
+          className="inline-flex items-center gap-1 rounded-full border border-[#30d158]/50 bg-[#30d158]/15 px-3 py-1 text-[11px] font-semibold text-[#47e266] transition hover:bg-[#30d158]/25 disabled:opacity-50"
+        >
+          <Download className="h-3 w-3" />
+          Download
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function InspectModal({
@@ -27,6 +95,7 @@ export function InspectModal({
   defaultAutoExport,
   onClose,
   onFolderPicked,
+  onViewExisting,
   onConfirm,
 }: InspectModalProps) {
   const firstAvailable = data.formats.find((f) => f.available)?.id ?? "best_mp4";
@@ -36,8 +105,13 @@ export function InspectModal({
   const [notes, setNotes] = useState("");
   const [exportDir, setExportDir] = useState(defaultFolder);
   const [saveToExportDir, setSaveToExportDir] = useState(defaultAutoExport);
+  const [downloadSubtitles, setDownloadSubtitles] = useState(false);
   const [pickingFolder, setPickingFolder] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+
+  const videoFormats = data.formats.filter((f) => f.kind === "video");
+  const audioFormats = data.formats.filter((f) => f.kind === "audio");
+  const imageFormats = data.formats.filter((f) => f.kind === "image");
 
   const addTag = () => {
     const cleaned = tagInput.trim().replace(/^#/, "");
@@ -61,10 +135,10 @@ export function InspectModal({
     }
   };
 
-  const handleConfirm = async () => {
+  const triggerDownload = async (formatId: FormatPreset) => {
     setSubmitting(true);
     try {
-      await onConfirm(selectedFormat, tags, notes, exportDir, saveToExportDir);
+      await onConfirm(formatId, tags, notes, exportDir, saveToExportDir, downloadSubtitles);
     } finally {
       setSubmitting(false);
     }
@@ -72,17 +146,21 @@ export function InspectModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 backdrop-blur-md"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/65 p-4 backdrop-blur-md"
       onClick={onClose}
     >
       <div
-        className="liquid-glass-elevated max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-3xl"
+        className="liquid-glass-elevated max-h-[92vh] w-full max-w-4xl overflow-y-auto rounded-3xl"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="flex items-center justify-between border-b border-[var(--mv-border)] px-6 py-4">
-          <div className="flex items-center gap-3">
-            <PlatformBadge platform={data.platform} />
+          <div className="flex flex-wrap items-center gap-2.5">
+            <PlatformBadge
+              platform={data.platform}
+              sourceDomain={data.source_domain}
+              siteName={data.site_name}
+            />
             <span className="text-sm font-semibold text-[var(--mv-primary-soft)]">
               {data.creator}
             </span>
@@ -101,71 +179,139 @@ export function InspectModal({
           </button>
         </div>
 
-        {/* Body */}
-        <div className="grid gap-6 p-6 md:grid-cols-[200px_1fr]">
-          {/* Thumbnail */}
-          <div className="overflow-hidden rounded-2xl border border-[var(--mv-border)] bg-[var(--mv-surface-lowest)]">
-            {data.thumbnail_url ? (
-              <img
-                src={data.thumbnail_url}
-                alt={data.caption}
-                className="aspect-[4/5] h-full w-full object-cover"
-              />
-            ) : (
-              <div className="flex aspect-[4/5] items-center justify-center text-[var(--mv-text-subtle)]">
-                {data.media_type === "video" ? <Film className="h-10 w-10" /> : <ImageIcon className="h-10 w-10" />}
-              </div>
+        {/* Duplicate Warning */}
+        {data.existing_media_id && (
+          <div className="mx-6 mt-4 flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-amber-400/35 bg-amber-400/10 px-4 py-2.5 text-xs text-amber-200">
+            <span className="flex items-center gap-2">
+              <AlertCircle className="h-4 w-4 text-amber-300" />
+              This exact link is already saved in your MediaVault library.
+            </span>
+            {onViewExisting && (
+              <button
+                type="button"
+                onClick={() => onViewExisting(data.existing_media_id!)}
+                className="rounded-full border border-amber-300/40 bg-amber-300/20 px-3 py-1 font-semibold text-white hover:bg-amber-300/30"
+              >
+                Open Saved Item
+              </button>
             )}
           </div>
+        )}
 
-          {/* Details & Options */}
-          <div className="space-y-4">
-            <p className="line-clamp-3 text-sm leading-relaxed text-[var(--mv-text)]">
+        {/* Body */}
+        <div className="grid gap-6 p-6 md:grid-cols-[210px_1fr]">
+          {/* Thumbnail & Metadata */}
+          <div className="space-y-3">
+            <div className="overflow-hidden rounded-2xl border border-[var(--mv-border)] bg-[var(--mv-surface-lowest)]">
+              {data.thumbnail_url ? (
+                <img
+                  src={data.thumbnail_url}
+                  alt={data.caption}
+                  className="aspect-[4/5] h-full w-full object-cover"
+                />
+              ) : (
+                <div className="flex aspect-[4/5] items-center justify-center text-[var(--mv-text-subtle)]">
+                  {data.media_type === "video" ? <Film className="h-10 w-10" /> : <ImageIcon className="h-10 w-10" />}
+                </div>
+              )}
+            </div>
+            <p className="line-clamp-4 text-xs leading-relaxed text-[var(--mv-text-muted)]">
               {data.caption}
             </p>
+          </div>
 
-            {/* Quality & File Size Picker */}
-            <div className="space-y-2">
-              <label className="text-xs font-medium uppercase tracking-wider text-[var(--mv-text-subtle)]">
-                Quality, Format & File Size
-              </label>
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {data.formats.map((fmt) => {
-                  const active = selectedFormat === fmt.id;
-                  return (
-                    <button
+          {/* Quality List + Options */}
+          <div className="space-y-4">
+            {/* Video / Image Qualities */}
+            {videoFormats.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <label className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-[var(--mv-text-subtle)]">
+                    <Film className="h-3.5 w-3.5" />
+                    Video Quality (Unlimited Size)
+                  </label>
+                </div>
+                <div className="max-h-60 space-y-1.5 overflow-y-auto pr-1">
+                  {videoFormats.map((fmt) => (
+                    <QualityRow
                       key={fmt.id}
-                      type="button"
-                      disabled={!fmt.available}
-                      onClick={() => setSelectedFormat(fmt.id)}
-                      className={`flex items-start justify-between rounded-xl border px-3 py-2.5 text-left transition ${
-                        !fmt.available
-                          ? "cursor-not-allowed border-[var(--mv-border)] opacity-35"
-                          : active
-                            ? "border-[#0a84ff] bg-[#0a84ff]/20 text-[var(--mv-text)]"
-                            : "border-[var(--mv-border)] bg-white/5 text-[var(--mv-text-muted)] hover:bg-white/10"
-                      }`}
-                    >
-                      <div className="min-w-0 flex-1 pr-2">
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className="truncate text-xs font-semibold">{fmt.label}</span>
-                          <span className="font-mono-meta shrink-0 rounded-full border border-white/15 bg-black/30 px-2 py-0.5 text-[10px] font-semibold text-[#aac7ff]">
-                            {fmt.estimated_size_label || "Auto"}
-                          </span>
-                        </div>
-                        <div className="mt-0.5 line-clamp-1 text-[11px] opacity-75">
-                          {fmt.description}
-                        </div>
-                      </div>
-                      {active && <Check className="mt-0.5 h-4 w-4 shrink-0 text-[#0a84ff]" />}
-                    </button>
-                  );
-                })}
+                      fmt={fmt}
+                      selected={selectedFormat === fmt.id}
+                      submitting={submitting}
+                      onSelect={() => setSelectedFormat(fmt.id)}
+                      onInstantDownload={() => triggerDownload(fmt.id)}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
+            )}
 
-            {/* Save Location Picker */}
-            <div className="space-y-2 rounded-2xl border border-[var(--mv-border)] bg-white/5 p-3">
+            {/* Audio MP3 Qualities */}
+            {audioFormats.length > 0 && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-[var(--mv-text-subtle)]">
+                  <Music className="h-3.5 w-3.5" />
+                  Audio Only (MP3)
+                </label>
+                <div className="space-y-1.5">
+                  {audioFormats.map((fmt) => (
+                    <QualityRow
+                      key={fmt.id}
+                      fmt={fmt}
+                      selected={selectedFormat === fmt.id}
+                      submitting={submitting}
+                      onSelect={() => setSelectedFormat(fmt.id)}
+                      onInstantDownload={() => triggerDownload(fmt.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Image / Carousel */}
+            {imageFormats.length > 0 && (
+              <div className="space-y-2">
+                <label className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-[var(--mv-text-subtle)]">
+                  <ImageIcon className="h-3.5 w-3.5" />
+                  Images / Carousel
+                </label>
+                <div className="space-y-1.5">
+                  {imageFormats.map((fmt) => (
+                    <QualityRow
+                      key={fmt.id}
+                      fmt={fmt}
+                      selected={selectedFormat === fmt.id}
+                      submitting={submitting}
+                      onSelect={() => setSelectedFormat(fmt.id)}
+                      onInstantDownload={() => triggerDownload(fmt.id)}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Subtitles + Folder Picker */}
+            <div className="space-y-2.5 rounded-2xl border border-[var(--mv-border)] bg-white/5 p-3">
+              {data.media_type === "video" && (
+                <label className="flex cursor-pointer items-center justify-between gap-2 border-b border-[var(--mv-border)] pb-2 text-xs text-[var(--mv-text)]">
+                  <span className="flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      checked={downloadSubtitles}
+                      onChange={(e) => setDownloadSubtitles(e.target.checked)}
+                      className="h-3.5 w-3.5 accent-[#0a84ff]"
+                    />
+                    <Captions className="h-3.5 w-3.5 text-[#aac7ff]" />
+                    Download subtitles (.srt / .vtt)
+                  </span>
+                  {data.subtitles_available && (
+                    <span className="font-mono-meta rounded-full bg-[#30d158]/20 px-2 py-0.5 text-[10px] text-[#47e266]">
+                      Available
+                    </span>
+                  )}
+                </label>
+              )}
+
               <div className="flex items-center justify-between gap-2">
                 <label className="flex cursor-pointer items-center gap-2 text-xs font-medium text-[var(--mv-text)]">
                   <input
@@ -196,11 +342,11 @@ export function InspectModal({
               )}
             </div>
 
-            {/* Custom Tags */}
+            {/* Custom Tags & Notes */}
             <div className="space-y-2">
               <label className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wider text-[var(--mv-text-subtle)]">
                 <Tag className="h-3.5 w-3.5" />
-                Custom Tags
+                Custom Tags & Notes
               </label>
               <div className="flex gap-2">
                 <input
@@ -213,7 +359,7 @@ export function InspectModal({
                       addTag();
                     }
                   }}
-                  placeholder="Add tag (e.g. 4k, anime, fav)..."
+                  placeholder="Add tag (e.g. 4k, tutorial, fav)..."
                   className="flex-1 rounded-xl border border-[var(--mv-border)] bg-white/5 px-3 py-2 text-xs text-[var(--mv-text)] outline-none placeholder:text-[var(--mv-text-subtle)] focus:border-[#0a84ff]"
                 />
                 <button
@@ -244,15 +390,14 @@ export function InspectModal({
                   ))}
                 </div>
               )}
+              <input
+                type="text"
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="Optional note..."
+                className="w-full rounded-xl border border-[var(--mv-border)] bg-white/5 px-3 py-2 text-xs text-[var(--mv-text)] outline-none placeholder:text-[var(--mv-text-subtle)] focus:border-[#0a84ff]"
+              />
             </div>
-
-            <input
-              type="text"
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              placeholder="Optional note..."
-              className="w-full rounded-xl border border-[var(--mv-border)] bg-white/5 px-3 py-2 text-xs text-[var(--mv-text)] outline-none placeholder:text-[var(--mv-text-subtle)] focus:border-[#0a84ff]"
-            />
           </div>
         </div>
 
@@ -268,11 +413,11 @@ export function InspectModal({
           <button
             type="button"
             disabled={submitting}
-            onClick={handleConfirm}
+            onClick={() => triggerDownload(selectedFormat)}
             className="inline-flex items-center gap-2 rounded-full bg-[#0a84ff] px-6 py-2 text-xs font-semibold text-white shadow-lg shadow-[#0a84ff]/25 transition hover:bg-[#3e90ff] disabled:opacity-50"
           >
             <Download className="h-3.5 w-3.5" />
-            {submitting ? "Queueing..." : "Download & Save"}
+            {submitting ? "Queueing..." : "Download Selected"}
           </button>
         </div>
       </div>

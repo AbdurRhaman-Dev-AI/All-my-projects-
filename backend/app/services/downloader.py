@@ -13,8 +13,8 @@ import yt_dlp
 from app.config import find_ffmpeg_executable, settings
 from app.database import async_session_factory
 from app.models import MediaItem
-from app.schemas import DownloadRequest, FormatPreset, MediaType, QueueJob
-from app.services.inspector import classify_error, detect_platform
+from app.schemas import BatchDownloadRequest, DownloadRequest, FormatPreset, MediaType, QueueJob
+from app.services.inspector import classify_error, detect_site_info
 
 
 FORMAT_SELECTORS: dict[FormatPreset, str] = {
@@ -24,8 +24,21 @@ FORMAT_SELECTORS: dict[FormatPreset, str] = {
     "mp4_1080p": "bv*[height<=1080]+ba/b[height<=1080]/b",
     "mp4_720p": "bv*[height<=720]+ba/b[height<=720]/b",
     "mp4_480p": "bv*[height<=480]+ba/b[height<=480]/b",
+    "mp4_360p": "bv*[height<=360]+ba/b[height<=360]/b",
+    "mp4_240p": "bv*[height<=240]+ba/b[height<=240]/b",
+    "mp4_144p": "bv*[height<=144]+ba/b[height<=144]/b",
     "audio_mp3": "ba/b",
+    "audio_mp3_320": "ba/b",
+    "audio_mp3_256": "ba/b",
+    "audio_mp3_128": "ba/b",
     "original_images": "best",
+}
+
+AUDIO_BITRATES: dict[str, str] = {
+    "audio_mp3": "192",
+    "audio_mp3_320": "320",
+    "audio_mp3_256": "256",
+    "audio_mp3_128": "128",
 }
 
 
@@ -46,11 +59,17 @@ class DownloadManager:
     def enqueue(self, req: DownloadRequest) -> QueueJob:
         job_id = str(uuid.uuid4())
         url_str = str(req.url)
-        platform = req.platform or detect_platform(url_str)
+        auto_platform, auto_domain, auto_name = detect_site_info(url_str)
+        platform = req.platform or auto_platform
+        source_domain = req.source_domain or auto_domain
+        site_name = req.site_name or auto_name
+
         job = QueueJob(
             job_id=job_id,
             url=url_str,
             platform=platform,
+            source_domain=source_domain,
+            site_name=site_name,
             creator=req.creator or "@unknown",
             caption=req.caption or "Downloading media...",
             thumbnail_url=req.thumbnail_url,
@@ -63,6 +82,20 @@ class DownloadManager:
         task = asyncio.create_task(self._process_job(job_id, req))
         self._tasks[job_id] = task
         return job
+
+    def enqueue_batch(self, req: BatchDownloadRequest) -> list[QueueJob]:
+        jobs: list[QueueJob] = []
+        for url in req.urls:
+            single = DownloadRequest(
+                url=url,
+                format_id=req.format_id,
+                tags=req.tags,
+                download_subtitles=req.download_subtitles,
+                export_dir=req.export_dir,
+                save_to_export_dir=req.save_to_export_dir,
+            )
+            jobs.append(self.enqueue(single))
+        return jobs
 
     async def _save_thumbnail(
         self,
@@ -119,7 +152,8 @@ class DownloadManager:
         dest_root.mkdir(parents=True, exist_ok=True)
         exported: list[str] = []
 
-        if len(files) > 1:
+        media_only = [f for f in files if f.suffix.lower() not in (".srt", ".vtt")]
+        if len(media_only) > 1:
             safe_creator = re.sub(r"[^a-zA-Z0-9._-]", "_", creator.lstrip("@") or "media")
             target_folder = dest_root / f"{safe_creator}_{media_id[:8]}"
             target_folder.mkdir(parents=True, exist_ok=True)
@@ -162,6 +196,7 @@ class DownloadManager:
         url: str,
         target_dir: Path,
         format_id: FormatPreset,
+        download_subtitles: bool,
         referer: Optional[str],
         job: QueueJob,
         loop: asyncio.AbstractEventLoop,
@@ -214,16 +249,21 @@ class DownloadManager:
         elif settings.cookies_from_browser:
             ydl_opts["cookiesfrombrowser"] = (settings.cookies_from_browser,)
 
-        if format_id == "audio_mp3":
+        if format_id in AUDIO_BITRATES:
             ydl_opts["postprocessors"] = [
                 {
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": "mp3",
-                    "preferredquality": "192",
+                    "preferredquality": AUDIO_BITRATES[format_id],
                 }
             ]
         elif format_id != "original_images":
             ydl_opts["merge_output_format"] = "mp4"
+            if download_subtitles:
+                ydl_opts["writesubtitles"] = True
+                ydl_opts["writeautomaticsub"] = True
+                ydl_opts["subtitleslangs"] = ["en.*", "en"]
+                ydl_opts["subtitlesformat"] = "srt/vtt/best"
 
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
@@ -248,11 +288,25 @@ class DownloadManager:
                     files = await self._download_with_gallery_dl(job.url, target_dir)
                 except Exception:
                     info, files = await asyncio.to_thread(
-                        self._run_ytdlp_sync, job.url, target_dir, req.format_id, req.referer, job, loop
+                        self._run_ytdlp_sync,
+                        job.url,
+                        target_dir,
+                        req.format_id,
+                        req.download_subtitles,
+                        req.referer,
+                        job,
+                        loop,
                     )
             else:
                 info, files = await asyncio.to_thread(
-                    self._run_ytdlp_sync, job.url, target_dir, req.format_id, req.referer, job, loop
+                    self._run_ytdlp_sync,
+                    job.url,
+                    target_dir,
+                    req.format_id,
+                    req.download_subtitles,
+                    req.referer,
+                    job,
+                    loop,
                 )
 
             if not files:
@@ -261,12 +315,16 @@ class DownloadManager:
             job.status = "processing"
             job.percent = 99.5
 
+            media_files = [f for f in files if f.suffix.lower() not in (".srt", ".vtt")]
+            if not media_files:
+                media_files = files
+
             final_media_type: MediaType
-            if req.format_id == "audio_mp3":
+            if req.format_id in AUDIO_BITRATES:
                 final_media_type = "audio"
-            elif len(files) > 1 and all(f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp") for f in files):
+            elif len(media_files) > 1 and all(f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp") for f in media_files):
                 final_media_type = "carousel"
-            elif all(f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp") for f in files):
+            elif all(f.suffix.lower() in (".jpg", ".jpeg", ".png", ".webp") for f in media_files):
                 final_media_type = "image"
             else:
                 final_media_type = "video"
@@ -274,12 +332,14 @@ class DownloadManager:
             thumb_rel = await self._save_thumbnail(
                 media_id,
                 req.thumbnail_url or info.get("thumbnail"),
-                files,
+                media_files,
                 final_media_type,
             )
 
-            rel_paths = [f"media/{f.relative_to(settings.media_path).as_posix()}" for f in files]
-            total_size = sum(f.stat().st_size for f in files if f.exists())
+            # Put main media files first, subtitle files after
+            ordered_files = [*media_files, *[f for f in files if f not in media_files]]
+            rel_paths = [f"media/{f.relative_to(settings.media_path).as_posix()}" for f in ordered_files]
+            total_size = sum(f.stat().st_size for f in ordered_files if f.exists())
 
             w = info.get("width")
             h = info.get("height")
@@ -289,19 +349,27 @@ class DownloadManager:
             creator = req.creator or (f"@{info['uploader_id']}" if info.get("uploader_id") else "@unknown")
             caption = req.caption or info.get("description") or info.get("title") or "Saved Media"
 
+            # Update job metadata if queued via batch without prior inspect
+            job.creator = creator[:255]
+            job.caption = caption[:200]
+            if not job.thumbnail_url and info.get("thumbnail"):
+                job.thumbnail_url = info.get("thumbnail")
+
             user_cfg = settings.get_user_settings()
             should_export = req.save_to_export_dir if req.export_dir is not None else bool(user_cfg.get("auto_export", True))
             export_dest = req.export_dir or str(user_cfg.get("download_dir") or settings.default_download_dir)
             exported_paths: list[str] = []
             if should_export and export_dest:
                 exported_paths = await asyncio.to_thread(
-                    self._export_to_folder, files, export_dest, creator, media_id
+                    self._export_to_folder, ordered_files, export_dest, creator, media_id
                 )
 
             async with async_session_factory() as db:
                 item = MediaItem(
                     id=media_id,
                     platform=job.platform,
+                    source_domain=job.source_domain,
+                    site_name=job.site_name,
                     original_url=job.url,
                     creator=creator[:255],
                     caption=caption[:2000],

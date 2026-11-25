@@ -2,9 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  ClipboardPaste,
   Download,
   DownloadCloud,
   FolderCog,
+  HardDrive,
+  Layers,
   Link2,
   Loader2,
   Moon,
@@ -17,30 +20,40 @@ import {
   clearCompletedQueue,
   deleteMediaItem,
   fetchMedia,
+  fetchMediaStats,
   fetchQueue,
   fetchSettingsStatus,
   inspectUrl,
   saveCookiesText,
+  startBatchDownload,
   startDownload,
   updateMediaTags,
   type SettingsStatus,
 } from "@/lib/api";
-import type { FormatPreset, InspectResponse, MediaItem, QueueJob } from "@/lib/types";
+import type { FormatPreset, InspectResponse, LibraryStats, MediaItem, QueueJob } from "@/lib/types";
+import { BatchModal } from "@/components/BatchModal";
 import { CookiesModal } from "@/components/CookiesModal";
 import { InspectModal } from "@/components/InspectModal";
 import { MediaCard } from "@/components/MediaCard";
 import { MediaLightbox } from "@/components/MediaLightbox";
+import { PlatformLogo } from "@/components/PlatformLogo";
 import { QueueDrawer } from "@/components/QueueDrawer";
 
-const FILTER_CHIPS = [
-  { id: "all", label: "All", kind: "reset" },
-  { id: "twitter", label: "X / Twitter", kind: "platform" },
-  { id: "instagram", label: "Instagram", kind: "platform" },
-  { id: "facebook", label: "Facebook", kind: "platform" },
-  { id: "missav", label: "MissAV", kind: "platform" },
-  { id: "video", label: "Videos", kind: "media_type" },
-  { id: "image", label: "Images", kind: "media_type" },
-] as const;
+const SUPPORTED_SHOWCASE = [
+  { platform: "youtube", domain: "youtube.com", label: "YouTube To MP4 / MP3" },
+  { platform: "youtube_shorts", domain: "youtube.com", label: "YouTube Shorts Downloader" },
+  { platform: "tiktok", domain: "tiktok.com", label: "TikTok Downloader" },
+  { platform: "instagram", domain: "instagram.com", label: "Instagram Video & Reels" },
+  { platform: "facebook", domain: "facebook.com", label: "Facebook Video Downloader" },
+  { platform: "twitter", domain: "x.com", label: "X / Twitter Downloader" },
+];
+
+function formatVaultBytes(bytes: number): string {
+  if (!bytes || bytes <= 0) return "0 MB";
+  const gb = bytes / (1024 * 1024 * 1024);
+  if (gb >= 1) return `${gb.toFixed(2)} GB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
 
 export default function HomePage() {
   const [urlInput, setUrlInput] = useState("");
@@ -53,6 +66,7 @@ export default function HomePage() {
   const [inspected, setInspected] = useState<InspectResponse | null>(null);
 
   const [items, setItems] = useState<MediaItem[]>([]);
+  const [stats, setStats] = useState<LibraryStats | null>(null);
   const [loadingLibrary, setLoadingLibrary] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [platformFilter, setPlatformFilter] = useState("all");
@@ -60,6 +74,7 @@ export default function HomePage() {
 
   const [queue, setQueue] = useState<QueueJob[]>([]);
   const [queueOpen, setQueueOpen] = useState(false);
+  const [batchOpen, setBatchOpen] = useState(false);
   const [cookiesOpen, setCookiesOpen] = useState(false);
   const [settingsStatus, setSettingsStatus] = useState<SettingsStatus | null>(null);
   const [selectedItem, setSelectedItem] = useState<MediaItem | null>(null);
@@ -72,6 +87,15 @@ export default function HomePage() {
     try {
       const s = await fetchSettingsStatus();
       setSettingsStatus(s);
+    } catch {
+      // ignore transient error
+    }
+  }, []);
+
+  const loadStats = useCallback(async () => {
+    try {
+      const st = await fetchMediaStats();
+      setStats(st);
     } catch {
       // ignore transient error
     }
@@ -99,12 +123,13 @@ export default function HomePage() {
       const completedCount = jobs.filter((j) => j.status === "completed").length;
       if (completedCount > prevCompletedRef.current) {
         loadLibrary();
+        loadStats();
       }
       prevCompletedRef.current = completedCount;
     } catch {
       // ignore transient polling error
     }
-  }, [loadLibrary]);
+  }, [loadLibrary, loadStats]);
 
   useEffect(() => {
     loadLibrary();
@@ -112,10 +137,11 @@ export default function HomePage() {
 
   useEffect(() => {
     loadSettingsStatus();
+    loadStats();
     loadQueue();
     const timer = setInterval(loadQueue, 1500);
     return () => clearInterval(timer);
-  }, [loadQueue, loadSettingsStatus]);
+  }, [loadQueue, loadSettingsStatus, loadStats]);
 
   const handleInspect = useCallback(
     async (targetUrl: string, overrideForce?: boolean) => {
@@ -137,6 +163,21 @@ export default function HomePage() {
     },
     [forceMode, forceReferer]
   );
+
+  const handlePasteButton = async () => {
+    try {
+      const clip = (await navigator.clipboard.readText()).trim();
+      if (!clip) return;
+      setUrlInput(clip);
+      urlInputRef.current?.focus();
+      if (/^https?:\/\//i.test(clip)) {
+        handleInspect(clip);
+      }
+    } catch {
+      urlInputRef.current?.focus();
+      setInspectError("Clipboard read blocked by browser — press Ctrl+V directly into the link box.");
+    }
+  };
 
   const handleDirectForceDownload = async () => {
     const target = (forceUrl || urlInput).trim();
@@ -192,7 +233,8 @@ export default function HomePage() {
     tags: string[],
     notes: string,
     exportDir: string,
-    saveToExportDir: boolean
+    saveToExportDir: boolean,
+    downloadSubtitles: boolean
   ) => {
     if (!inspected) return;
     await startDownload({
@@ -204,9 +246,12 @@ export default function HomePage() {
       caption: inspected.caption,
       thumbnail_url: inspected.thumbnail_url,
       platform: inspected.platform,
+      source_domain: inspected.source_domain,
+      site_name: inspected.site_name,
       media_type: inspected.media_type,
       export_dir: exportDir,
       save_to_export_dir: saveToExportDir,
+      download_subtitles: downloadSubtitles,
       referer: inspected.referer || undefined,
     });
     setInspected(null);
@@ -220,6 +265,7 @@ export default function HomePage() {
     setItems((prev) => prev.filter((x) => x.id !== id));
     if (selectedItem?.id === id) setSelectedItem(null);
     await deleteMediaItem(id);
+    await loadStats();
   };
 
   const handleUpdateItem = async (id: string, tags: string[], notes: string) => {
@@ -236,7 +282,7 @@ export default function HomePage() {
     <div className="min-h-screen pb-16">
       {/* Sticky Floating Top Bar */}
       <header className="sticky top-0 z-40 px-4 pt-4 sm:px-8">
-        <div className="liquid-glass mx-auto flex max-w-7xl flex-col gap-3 rounded-3xl p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="liquid-glass mx-auto flex max-w-7xl flex-col gap-3 rounded-3xl p-4 xl:flex-row xl:items-center xl:justify-between">
           {/* Brand */}
           <div className="flex items-center justify-between gap-3">
             <div className="flex items-center gap-2.5">
@@ -247,30 +293,42 @@ export default function HomePage() {
                 <h1 className="text-base font-semibold tracking-tight text-[var(--mv-text)]">
                   MediaVault
                 </h1>
-                <p className="font-mono-meta text-[10px] uppercase tracking-wider text-[var(--mv-text-subtle)]">
-                  Liquid Glass Vault
+                <p className="font-mono-meta flex items-center gap-1.5 text-[10px] uppercase tracking-wider text-[var(--mv-text-subtle)]">
+                  <span>Liquid Glass</span>
+                  {stats && (
+                    <span className="inline-flex items-center gap-1 text-[var(--mv-primary-soft)]">
+                      · <HardDrive className="h-2.5 w-2.5" /> {stats.total_items} items · {formatVaultBytes(stats.total_size_bytes)}
+                    </span>
+                  )}
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center gap-2 lg:hidden">
+            <div className="flex items-center gap-1.5 xl:hidden">
+              <button
+                type="button"
+                onClick={() => setBatchOpen(true)}
+                className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--mv-border)] bg-white/5 text-[var(--mv-text)]"
+                title="Batch Multi-Link Download"
+              >
+                <Layers className="h-4 w-4" />
+              </button>
               <button
                 type="button"
                 onClick={() => setForceMode((v) => !v)}
-                className={`inline-flex h-9 items-center gap-1 rounded-full border px-3 text-xs font-medium ${
+                className={`inline-flex h-9 items-center gap-1 rounded-full border px-2.5 text-xs font-medium ${
                   forceMode
                     ? "border-[#5e5ce6] bg-[#5e5ce6]/25 text-white"
                     : "border-[var(--mv-border)] bg-white/5 text-[var(--mv-text)]"
                 }`}
               >
                 <Zap className="h-3.5 w-3.5" />
-                Force
               </button>
               <button
                 type="button"
                 onClick={() => setCookiesOpen(true)}
                 className="flex h-9 w-9 items-center justify-center rounded-full border border-[var(--mv-border)] bg-white/5 text-[var(--mv-text)]"
-                title="Download Folder & Cookies"
+                title="Folder & Cookies"
               >
                 <FolderCog className="h-4 w-4" />
               </button>
@@ -296,13 +354,13 @@ export default function HomePage() {
             </div>
           </div>
 
-          {/* Floating URL Paste Bar */}
+          {/* Floating URL Paste Bar with One-Click Paste + Inspect */}
           <form
             onSubmit={(e) => {
               e.preventDefault();
               handleInspect(urlInput);
             }}
-            className="flex flex-1 items-center gap-2 rounded-full border border-[var(--mv-border)] bg-black/20 px-4 py-1.5 lg:max-w-xl"
+            className="flex flex-1 items-center gap-1.5 rounded-full border border-[var(--mv-border)] bg-black/20 px-3.5 py-1.5 xl:max-w-xl"
           >
             <Link2 className="h-4 w-4 shrink-0 text-[var(--mv-text-subtle)]" />
             <input
@@ -310,39 +368,57 @@ export default function HomePage() {
               type="url"
               value={urlInput}
               onChange={(e) => setUrlInput(e.target.value)}
-              placeholder="Paste X, Instagram, Facebook, MissAV, or video URL..."
+              placeholder="Paste any video, photo, or social URL..."
               className="w-full bg-transparent text-sm text-[var(--mv-text)] outline-none placeholder:text-[var(--mv-text-subtle)]"
             />
+            <button
+              type="button"
+              onClick={handlePasteButton}
+              title="Paste link from clipboard and inspect"
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--mv-border)] bg-white/10 px-3 py-1.5 text-xs font-medium text-[var(--mv-text)] transition hover:bg-white/15"
+            >
+              <ClipboardPaste className="h-3.5 w-3.5 text-[#aac7ff]" />
+              Paste
+            </button>
             <button
               type="submit"
               disabled={inspecting || !urlInput.trim()}
               className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-[#0a84ff] px-4 py-1.5 text-xs font-semibold text-white shadow-md shadow-[#0a84ff]/25 transition hover:bg-[#3e90ff] disabled:opacity-50"
             >
               {inspecting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-              {inspecting ? "Inspecting" : "Inspect"}
+              {inspecting ? "Inspecting" : "Download"}
             </button>
           </form>
 
           {/* Desktop Right Controls */}
-          <div className="hidden items-center gap-2 lg:flex">
+          <div className="hidden items-center gap-2 xl:flex">
+            <button
+              type="button"
+              onClick={() => setBatchOpen(true)}
+              title="Batch Multi-Link Download"
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--mv-border)] bg-white/5 px-3 text-xs font-medium text-[var(--mv-text)] transition hover:bg-white/10"
+            >
+              <Layers className="h-3.5 w-3.5 text-[#aac7ff]" />
+              <span>Batch</span>
+            </button>
             <button
               type="button"
               onClick={() => setForceMode((v) => !v)}
               title="Open Force Download Section"
-              className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3.5 text-xs font-medium transition ${
+              className={`inline-flex h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium transition ${
                 forceMode
                   ? "border-[#5e5ce6] bg-[#5e5ce6]/25 text-white"
                   : "border-[var(--mv-border)] bg-white/5 text-[var(--mv-text)] hover:bg-white/10"
               }`}
             >
               <Zap className="h-3.5 w-3.5 text-[#c2c1ff]" />
-              <span>Force Download</span>
+              <span>Force</span>
             </button>
             <button
               type="button"
               onClick={() => setCookiesOpen(true)}
               title="Download Folder & Cookies"
-              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--mv-border)] bg-white/5 px-3.5 text-xs font-medium text-[var(--mv-text)] transition hover:bg-white/10"
+              className="inline-flex h-9 items-center gap-1.5 rounded-full border border-[var(--mv-border)] bg-white/5 px-3 text-xs font-medium text-[var(--mv-text)] transition hover:bg-white/10"
             >
               <span
                 className={`h-1.5 w-1.5 rounded-full ${
@@ -350,7 +426,7 @@ export default function HomePage() {
                 }`}
               />
               <FolderCog className="h-3.5 w-3.5" />
-              <span>Folder & Cookies</span>
+              <span>Settings</span>
             </button>
             <button
               type="button"
@@ -363,7 +439,7 @@ export default function HomePage() {
             <button
               type="button"
               onClick={() => setQueueOpen(true)}
-              className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--mv-border)] bg-white/5 px-4 text-xs font-medium text-[var(--mv-text)] transition hover:bg-white/10"
+              className="inline-flex h-9 items-center gap-2 rounded-full border border-[var(--mv-border)] bg-white/5 px-3.5 text-xs font-medium text-[var(--mv-text)] transition hover:bg-white/10"
             >
               <DownloadCloud className="h-4 w-4 text-[#0a84ff]" />
               <span>Queue</span>
@@ -452,7 +528,7 @@ export default function HomePage() {
                   onClick={() => setCookiesOpen(true)}
                   className="rounded-full border border-white/20 bg-white/10 px-3 py-1 font-semibold text-white hover:bg-white/20"
                 >
-                  Open Folder & Cookies
+                  Open Settings & Cookies
                 </button>
               )}
             </div>
@@ -460,40 +536,69 @@ export default function HomePage() {
         )}
       </header>
 
-      {/* Filter Chips & Tag Search */}
+      {/* Auto-Growing Website Logo Filter Chips & Search */}
       <main className="mx-auto mt-6 max-w-7xl px-4 sm:px-8">
         <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-2">
-            {FILTER_CHIPS.map((chip) => {
-              const isActive =
-                (chip.kind === "reset" && platformFilter === "all" && mediaTypeFilter === "all") ||
-                (chip.kind === "platform" && platformFilter === chip.id) ||
-                (chip.kind === "media_type" && mediaTypeFilter === chip.id);
+            <button
+              type="button"
+              onClick={() => {
+                setPlatformFilter("all");
+                setMediaTypeFilter("all");
+              }}
+              className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
+                platformFilter === "all" && mediaTypeFilter === "all"
+                  ? "border-[#0a84ff] bg-[#0a84ff]/20 text-[var(--mv-text)]"
+                  : "border-[var(--mv-border)] bg-white/5 text-[var(--mv-text-muted)] hover:bg-white/10"
+              }`}
+            >
+              All {stats ? `(${stats.total_items})` : ""}
+            </button>
 
+            {/* Dynamically populated websites with logos as you download from them */}
+            {(stats?.platforms || []).map((p) => {
+              const isActive = platformFilter === p.platform;
               return (
                 <button
-                  key={chip.id}
+                  key={p.platform}
                   type="button"
-                  onClick={() => {
-                    if (chip.kind === "reset") {
-                      setPlatformFilter("all");
-                      setMediaTypeFilter("all");
-                    } else if (chip.kind === "platform") {
-                      setPlatformFilter((p) => (p === chip.id ? "all" : chip.id));
-                    } else {
-                      setMediaTypeFilter((m) => (m === chip.id ? "all" : chip.id));
-                    }
-                  }}
-                  className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
+                  onClick={() => setPlatformFilter((cur) => (cur === p.platform ? "all" : p.platform))}
+                  className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition ${
                     isActive
                       ? "border-[#0a84ff] bg-[#0a84ff]/20 text-[var(--mv-text)]"
                       : "border-[var(--mv-border)] bg-white/5 text-[var(--mv-text-muted)] hover:bg-white/10"
                   }`}
                 >
-                  {chip.label}
+                  <PlatformLogo platform={p.platform} sourceDomain={p.source_domain} size={14} />
+                  <span>{p.site_name}</span>
+                  <span className="font-mono-meta text-[10px] opacity-65">{p.count}</span>
                 </button>
               );
             })}
+
+            <button
+              type="button"
+              onClick={() => setMediaTypeFilter((m) => (m === "video" ? "all" : "video"))}
+              className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
+                mediaTypeFilter === "video"
+                  ? "border-[#0a84ff] bg-[#0a84ff]/20 text-[var(--mv-text)]"
+                  : "border-[var(--mv-border)] bg-white/5 text-[var(--mv-text-muted)] hover:bg-white/10"
+              }`}
+            >
+              Videos
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMediaTypeFilter((m) => (m === "image" ? "all" : "image"))}
+              className={`rounded-full border px-3.5 py-1.5 text-xs font-medium transition ${
+                mediaTypeFilter === "image"
+                  ? "border-[#0a84ff] bg-[#0a84ff]/20 text-[var(--mv-text)]"
+                  : "border-[var(--mv-border)] bg-white/5 text-[var(--mv-text-muted)] hover:bg-white/10"
+              }`}
+            >
+              Images
+            </button>
           </div>
 
           <div className="liquid-glass flex items-center gap-2 rounded-full px-3.5 py-1.5 sm:w-72">
@@ -502,10 +607,31 @@ export default function HomePage() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search captions, @creator, #tags..."
+              placeholder="Search captions, @creator, site, #tags..."
               className="w-full bg-transparent text-xs text-[var(--mv-text)] outline-none placeholder:text-[var(--mv-text-subtle)]"
             />
           </div>
+        </div>
+
+        {/* Supported Platforms Showcase Strip (Screenshot-2 style) */}
+        <div className="mb-6 grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6">
+          {SUPPORTED_SHOWCASE.map((site) => (
+            <button
+              key={site.platform}
+              type="button"
+              onClick={() => {
+                setPlatformFilter((cur) => (cur === site.platform ? "all" : site.platform));
+              }}
+              className={`liquid-glass flex items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left transition hover:border-white/25 ${
+                platformFilter === site.platform ? "border-[#0a84ff] bg-[#0a84ff]/15" : ""
+              }`}
+            >
+              <PlatformLogo platform={site.platform} sourceDomain={site.domain} size={18} />
+              <span className="truncate text-[11px] font-medium text-[var(--mv-text)]">
+                {site.label}
+              </span>
+            </button>
+          ))}
         </div>
 
         {/* Masonry Library Grid */}
@@ -517,13 +643,15 @@ export default function HomePage() {
         ) : items.length === 0 ? (
           <div className="liquid-glass flex flex-col items-center justify-center rounded-3xl px-6 py-20 text-center">
             <DownloadCloud className="mb-3 h-10 w-10 text-[#0a84ff] opacity-80" />
-            <h2 className="text-lg font-semibold text-[var(--mv-text)]">Your MediaVault is empty</h2>
+            <h2 className="text-lg font-semibold text-[var(--mv-text)]">
+              {stats && stats.total_items > 0 ? "No items match your current filter" : "Your MediaVault is empty"}
+            </h2>
             <p className="mt-1 max-w-md text-sm text-[var(--mv-text-subtle)]">
-              Paste any supported URL in the bar above—or press{" "}
+              Click <strong>Paste</strong> in the bar above, paste any URL—or press{" "}
               <kbd className="font-mono-meta rounded border border-[var(--mv-border)] bg-white/10 px-1.5 py-0.5 text-[11px]">
                 Ctrl/Cmd + V
               </kbd>{" "}
-              anywhere to inspect and save.
+              anywhere. Every new website you download from is added automatically with its logo.
             </p>
           </div>
         ) : (
@@ -547,9 +675,26 @@ export default function HomePage() {
           defaultAutoExport={settingsStatus?.auto_export ?? true}
           onClose={() => setInspected(null)}
           onFolderPicked={() => loadSettingsStatus()}
+          onViewExisting={(existingId) => {
+            const found = items.find((x) => x.id === existingId);
+            setInspected(null);
+            if (found) setSelectedItem(found);
+          }}
           onConfirm={handleConfirmDownload}
         />
       )}
+
+      <BatchModal
+        open={batchOpen}
+        defaultFolder={settingsStatus?.download_dir || ""}
+        defaultAutoExport={settingsStatus?.auto_export ?? true}
+        onClose={() => setBatchOpen(false)}
+        onSubmitBatch={async (payload) => {
+          await startBatchDownload(payload);
+          setQueueOpen(true);
+          await loadQueue();
+        }}
+      />
 
       <CookiesModal
         open={cookiesOpen}

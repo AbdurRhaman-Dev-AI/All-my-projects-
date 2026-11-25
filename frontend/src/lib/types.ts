@@ -1,4 +1,3 @@
-export type PlatformType = "twitter" | "instagram" | "facebook" | "missav" | "other";
 export type MediaType = "video" | "image" | "carousel" | "audio";
 export type FormatPreset =
   | "best_mp4"
@@ -7,15 +6,23 @@ export type FormatPreset =
   | "mp4_1080p"
   | "mp4_720p"
   | "mp4_480p"
+  | "mp4_360p"
+  | "mp4_240p"
+  | "mp4_144p"
   | "audio_mp3"
+  | "audio_mp3_320"
+  | "audio_mp3_256"
+  | "audio_mp3_128"
   | "original_images";
 export type QueueStatus = "queued" | "downloading" | "processing" | "completed" | "failed";
 
 export interface FormatOption {
   id: FormatPreset;
+  kind: "video" | "audio" | "image";
   label: string;
   description: string;
   resolution_tag?: string | null;
+  badge_tag?: string | null;
   estimated_size_bytes?: number | null;
   estimated_size_label?: string | null;
   available: boolean;
@@ -25,7 +32,9 @@ export interface InspectResponse {
   url: string;
   resolved_stream_url?: string | null;
   referer?: string | null;
-  platform: PlatformType;
+  platform: string;
+  source_domain: string;
+  site_name: string;
   creator: string;
   caption: string;
   thumbnail_url: string | null;
@@ -33,6 +42,8 @@ export interface InspectResponse {
   duration: number | null;
   resolution: string | null;
   item_count: number;
+  subtitles_available?: boolean;
+  existing_media_id?: string | null;
   formats: FormatOption[];
 }
 
@@ -44,17 +55,31 @@ export interface DownloadRequest {
   creator?: string | null;
   caption?: string | null;
   thumbnail_url?: string | null;
-  platform?: PlatformType | null;
+  platform?: string | null;
+  source_domain?: string | null;
+  site_name?: string | null;
   media_type?: MediaType | null;
   export_dir?: string | null;
   save_to_export_dir?: boolean;
+  download_subtitles?: boolean;
   referer?: string | null;
+}
+
+export interface BatchDownloadRequest {
+  urls: string[];
+  format_id: FormatPreset;
+  tags: string[];
+  download_subtitles: boolean;
+  export_dir?: string | null;
+  save_to_export_dir?: boolean;
 }
 
 export interface QueueJob {
   job_id: string;
   url: string;
-  platform: PlatformType;
+  platform: string;
+  source_domain?: string;
+  site_name?: string;
   creator: string;
   caption: string;
   thumbnail_url: string | null;
@@ -71,7 +96,9 @@ export interface QueueJob {
 
 export interface MediaItem {
   id: string;
-  platform: PlatformType;
+  platform: string;
+  source_domain: string;
+  site_name: string;
   original_url: string;
   creator: string;
   caption: string;
@@ -84,4 +111,17 @@ export interface MediaItem {
   tags: string[];
   notes: string;
   created_at: string;
+}
+
+export interface PlatformFilterInfo {
+  platform: string;
+  source_domain: string;
+  site_name: string;
+  count: number;
+}
+
+export interface LibraryStats {
+  total_items: number;
+  total_size_bytes: number;
+  platforms: PlatformFilterInfo[];
 }

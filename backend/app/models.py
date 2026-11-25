@@ -14,7 +14,9 @@ class MediaItem(Base):
     __tablename__ = "media_items"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    platform: Mapped[str] = mapped_column(String(32), index=True)
+    platform: Mapped[str] = mapped_column(String(64), index=True)
+    source_domain: Mapped[str] = mapped_column(String(128), default="", index=True)
+    site_name: Mapped[str] = mapped_column(String(64), default="")
     original_url: Mapped[str] = mapped_column(Text)
     creator: Mapped[str] = mapped_column(String(255), default="unknown", index=True)
     caption: Mapped[str] = mapped_column(Text, default="")
